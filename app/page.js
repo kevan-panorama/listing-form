@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 
 const steps = ["Agent", "Owner", "Property", "Documents", "Review"];
 
@@ -42,12 +42,12 @@ const agents = [
 ];
 
 const requiredDocs = [
-  ["titleDeed", "Title deed"],
-  ["ownerId", "Owner ID"],
-  ["authorization", "Signed authorization"],
-  ["photos", "Property photos"],
-  ["floorplan", "Floorplan"],
-  ["energyCertificate", "Energy certificate"],
+  ["titleDeed", "Escritura / Title deed"],
+  ["ownerId", "DNI/NIE propietario / Owner ID"],
+  ["authorization", "Autorización firmada / Signed authorization"],
+  ["photos", "Fotos de la propiedad / Property photos"],
+  ["floorplan", "Plano / Floorplan"],
+  ["energyCertificate", "Certificado energético / Energy certificate"],
 ];
 
 const initialForm = {
@@ -59,13 +59,19 @@ const initialForm = {
   ownerEmail: "",
   propertyTitle: "",
   propertyType: "",
+  operation: "",
   address: "",
   city: "",
   neighborhood: "",
   bedrooms: "",
   bathrooms: "",
   surfaceSqm: "",
+  plotSqm: "",
+  terraceSqm: "",
   price: "",
+  commission: "",
+  description: "",
+  voiceTranscript: "",
   notes: "",
 };
 
@@ -82,8 +88,36 @@ export default function Page() {
     setForm((f) => ({ ...f, [key]: value }));
   };
 
-  const next = () => {
+  const applyTranscript = (text) => {
+    const extracted = extractPropertyInfo(text);
+
+    setForm((f) => ({
+      ...f,
+      voiceTranscript: text,
+      propertyType: extracted.propertyType || f.propertyType,
+      operation: extracted.operation || f.operation,
+      city: extracted.city || f.city,
+      neighborhood: extracted.neighborhood || f.neighborhood,
+      address: extracted.address || f.address,
+      bedrooms: extracted.bedrooms || f.bedrooms,
+      bathrooms: extracted.bathrooms || f.bathrooms,
+      surfaceSqm: extracted.surfaceSqm || f.surfaceSqm,
+      plotSqm: extracted.plotSqm || f.plotSqm,
+      terraceSqm: extracted.terraceSqm || f.terraceSqm,
+      price: extracted.price || f.price,
+      description: text || f.description,
+    }));
+
+    setMessage("Voice note processed. Please review the auto-filled fields.");
+  };
+
+  const validateAndGo = (targetStep) => {
     setMessage("");
+
+    if (targetStep < step) {
+      setStep(targetStep);
+      return;
+    }
 
     if (step === 0 && !form.agentEmail) {
       setMessage("Please select an agent.");
@@ -103,34 +137,40 @@ export default function Page() {
         !form.city ||
         !form.price)
     ) {
-      setMessage("Please complete all property fields.");
+      setMessage("Please complete all required property fields.");
       return;
     }
 
     if (step === 3) {
-      const missing = requiredDocs.filter(([key]) => !files[key]);
-
+      const missing = requiredDocs.filter(([key]) => !files[key]?.length);
       if (missing.length) {
         setMessage("All required documents must be uploaded.");
         return;
       }
     }
 
-    setStep((s) => s + 1);
+    setStep(targetStep);
   };
+
+  const next = () => validateAndGo(step + 1);
 
   const back = () => {
     setMessage("");
-    setStep((s) => s - 1);
+    setStep((s) => Math.max(s - 1, 0));
   };
 
   const submit = async () => {
     setLoading(true);
+    setMessage("");
 
     const body = new FormData();
 
     Object.entries(form).forEach(([key, value]) => {
-      body.append(key, value);
+      body.append(key, value || "");
+    });
+
+    Object.entries(files).forEach(([key, fileList]) => {
+      fileList.forEach((file) => body.append(key, file));
     });
 
     const res = await fetch("/api/listings", {
@@ -141,7 +181,7 @@ export default function Page() {
     setLoading(false);
 
     if (!res.ok) {
-      setMessage("Submission failed.");
+      setMessage("Submission failed. Please check the required fields and documents.");
       return;
     }
 
@@ -154,13 +194,8 @@ export default function Page() {
         <div className="rounded-[32px] bg-[#17395c] p-6 text-white shadow-2xl">
           <div className="flex flex-col gap-5 md:flex-row md:items-center md:justify-between">
             <div>
-              <h1 className="text-3xl font-bold">
-                Alta de Propiedad
-              </h1>
-
-              <p className="mt-2 text-white/70">
-                Property Intake Form
-              </p>
+              <h1 className="text-3xl font-bold">Alta de Propiedad</h1>
+              <p className="mt-2 text-white/70">Property Intake Form</p>
             </div>
 
             <div className="text-sm text-white/70">
@@ -177,9 +212,13 @@ export default function Page() {
 
           <div className="mt-6 grid grid-cols-5 gap-2">
             {steps.map((s, i) => (
-              <div
+              <button
                 key={s}
-                className={`rounded-full px-3 py-2 text-center text-xs font-semibold transition-all ${
+                type="button"
+                onClick={() => {
+                  if (i <= step) setStep(i);
+                }}
+                className={`rounded-full px-2 py-2 text-center text-[11px] font-semibold transition-all md:text-xs ${
                   i === step
                     ? "bg-white text-[#17395c]"
                     : i < step
@@ -188,7 +227,7 @@ export default function Page() {
                 }`}
               >
                 {s}
-              </div>
+              </button>
             ))}
           </div>
         </div>
@@ -207,16 +246,12 @@ export default function Page() {
               </h2>
 
               <label className="block">
-                <span className="mb-2 block text-sm font-semibold">
-                  Agent
-                </span>
+                <span className="mb-2 block text-sm font-semibold">Agent</span>
 
                 <select
                   value={form.agentEmail}
                   onChange={(e) => {
-                    const selected = agents.find(
-                      (a) => a.email === e.target.value
-                    );
+                    const selected = agents.find((a) => a.email === e.target.value);
 
                     if (selected) {
                       update("agentName", selected.name);
@@ -227,7 +262,6 @@ export default function Page() {
                   className="w-full rounded-2xl border border-slate-200 bg-[#faf9f5] px-5 py-4 text-base outline-none focus:border-[#17395c]"
                 >
                   <option value="">Select agent...</option>
-
                   {agents.map((agent) => (
                     <option key={agent.email} value={agent.email}>
                       {agent.name}
@@ -253,100 +287,80 @@ export default function Page() {
               </h2>
 
               <Grid>
-                <Input
-                  label="Owner Name"
-                  value={form.ownerName}
-                  onChange={(v) => update("ownerName", v)}
-                />
-
-                <Input
-                  label="Owner Phone"
-                  value={form.ownerPhone}
-                  onChange={(v) => update("ownerPhone", v)}
-                />
-
-                <Input
-                  label="Owner Email"
-                  value={form.ownerEmail}
-                  onChange={(v) => update("ownerEmail", v)}
-                />
+                <Input label="Owner Name" value={form.ownerName} onChange={(v) => update("ownerName", v)} />
+                <Input label="Owner Phone" value={form.ownerPhone} onChange={(v) => update("ownerPhone", v)} />
+                <Input label="Owner Email" value={form.ownerEmail} onChange={(v) => update("ownerEmail", v)} />
               </Grid>
             </section>
           )}
 
           {step === 2 && (
             <section>
-              <h2 className="mb-6 text-2xl font-bold text-[#17395c]">
-                Property Details
-              </h2>
+              <div className="mb-6 flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+                <div>
+                  <h2 className="text-2xl font-bold text-[#17395c]">
+                    Property Details
+                  </h2>
+                  <p className="mt-1 text-sm text-slate-500">
+                    Fill manually or use voice note to auto-fill fields.
+                  </p>
+                </div>
+
+                <VoiceBox
+                  transcript={form.voiceTranscript}
+                  onTranscript={applyTranscript}
+                />
+              </div>
 
               <Grid>
-                <Input
-                  label="Property Title"
-                  value={form.propertyTitle}
-                  onChange={(v) => update("propertyTitle", v)}
-                />
+                <Input label="Property Title" value={form.propertyTitle} onChange={(v) => update("propertyTitle", v)} />
 
                 <Select
                   label="Property Type"
                   value={form.propertyType}
                   onChange={(v) => update("propertyType", v)}
-                  options={[
-                    "Villa",
-                    "Apartment",
-                    "Penthouse",
-                    "Townhouse",
-                    "Plot",
-                    "Commercial",
-                  ]}
+                  options={["Villa", "Apartment", "Penthouse", "Townhouse", "Plot", "Commercial"]}
                 />
 
-                <Input
-                  label="Address"
-                  value={form.address}
-                  onChange={(v) => update("address", v)}
+                <Select
+                  label="Operation"
+                  value={form.operation}
+                  onChange={(v) => update("operation", v)}
+                  options={["Sale", "Rental", "Both"]}
                 />
 
-                <Input
-                  label="City"
-                  value={form.city}
-                  onChange={(v) => update("city", v)}
-                />
+                <Input label="Address" value={form.address} onChange={(v) => update("address", v)} />
 
-                <Input
-                  label="Neighborhood"
-                  value={form.neighborhood}
-                  onChange={(v) => update("neighborhood", v)}
-                />
+                <Input label="City" value={form.city} onChange={(v) => update("city", v)} />
 
-                <Input
-                  label="Bedrooms"
-                  type="number"
-                  value={form.bedrooms}
-                  onChange={(v) => update("bedrooms", v)}
-                />
+                <Input label="Neighborhood" value={form.neighborhood} onChange={(v) => update("neighborhood", v)} />
 
-                <Input
-                  label="Bathrooms"
-                  type="number"
-                  value={form.bathrooms}
-                  onChange={(v) => update("bathrooms", v)}
-                />
+                <Input label="Bedrooms" type="number" value={form.bedrooms} onChange={(v) => update("bedrooms", v)} />
 
-                <Input
-                  label="Built sqm"
-                  type="number"
-                  value={form.surfaceSqm}
-                  onChange={(v) => update("surfaceSqm", v)}
-                />
+                <Input label="Bathrooms" type="number" value={form.bathrooms} onChange={(v) => update("bathrooms", v)} />
 
-                <Input
-                  label="Price €"
-                  type="number"
-                  value={form.price}
-                  onChange={(v) => update("price", v)}
-                />
+                <Input label="Built sqm" type="number" value={form.surfaceSqm} onChange={(v) => update("surfaceSqm", v)} />
+
+                <Input label="Plot sqm" type="number" value={form.plotSqm} onChange={(v) => update("plotSqm", v)} />
+
+                <Input label="Terrace sqm" type="number" value={form.terraceSqm} onChange={(v) => update("terraceSqm", v)} />
+
+                <Input label="Price €" type="number" value={form.price} onChange={(v) => update("price", v)} />
+
+                <Input label="Commission" value={form.commission} onChange={(v) => update("commission", v)} />
               </Grid>
+
+              <label className="mt-5 block">
+                <span className="mb-2 block text-sm font-semibold text-slate-700">
+                  Description / Voice transcript
+                </span>
+                <textarea
+                  value={form.description}
+                  onChange={(e) => update("description", e.target.value)}
+                  className="min-h-[140px] w-full rounded-2xl border border-slate-200 bg-[#faf9f5] px-5 py-4 outline-none transition focus:border-[#17395c]"
+                  placeholder="Speak or write the property description here..."
+                />
+              </label>
             </section>
           )}
 
@@ -367,12 +381,9 @@ export default function Page() {
                     className="flex flex-col gap-4 rounded-2xl border border-slate-200 bg-[#faf9f5] p-5 md:flex-row md:items-center md:justify-between"
                   >
                     <div>
-                      <div className="font-semibold">
-                        {label}
-                      </div>
-
+                      <div className="font-semibold">{label}</div>
                       <div className="mt-1 text-xs text-slate-500">
-                        PDF, image or document
+                        {files[key]?.length ? `${files[key].length} file(s) selected` : "PDF, image or document"}
                       </div>
                     </div>
 
@@ -403,8 +414,10 @@ export default function Page() {
                 <ReviewRow label="Owner" value={form.ownerName} />
                 <ReviewRow label="Property" value={form.propertyTitle} />
                 <ReviewRow label="Type" value={form.propertyType} />
-                <ReviewRow label="Address" value={form.address} />
-                <ReviewRow label="Price" value={`€ ${form.price}`} />
+                <ReviewRow label="Operation" value={form.operation} />
+                <ReviewRow label="Address" value={`${form.address}, ${form.city}`} />
+                <ReviewRow label="Price" value={form.price ? `€ ${form.price}` : ""} />
+                <ReviewRow label="Documents" value={`${Object.keys(files).length} / ${requiredDocs.length}`} />
               </div>
 
               <textarea
@@ -449,12 +462,168 @@ export default function Page() {
   );
 }
 
-function Grid({ children }) {
+function VoiceBox({ transcript, onTranscript }) {
+  const recognitionRef = useRef(null);
+  const [listening, setListening] = useState(false);
+  const [localTranscript, setLocalTranscript] = useState(transcript || "");
+  const [fallback, setFallback] = useState(false);
+
+  const startVoice = () => {
+    const SpeechRecognition =
+      typeof window !== "undefined" &&
+      (window.SpeechRecognition || window.webkitSpeechRecognition);
+
+    if (!SpeechRecognition) {
+      setFallback(true);
+      return;
+    }
+
+    const recognition = new SpeechRecognition();
+    recognitionRef.current = recognition;
+
+    recognition.lang = "en-GB";
+    recognition.interimResults = true;
+    recognition.continuous = true;
+
+    let finalText = localTranscript ? localTranscript + " " : "";
+
+    recognition.onstart = () => setListening(true);
+
+    recognition.onresult = (event) => {
+      let interimText = "";
+
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        const text = event.results[i][0].transcript;
+
+        if (event.results[i].isFinal) {
+          finalText += text + " ";
+        } else {
+          interimText += text;
+        }
+      }
+
+      setLocalTranscript((finalText + interimText).trim());
+    };
+
+    recognition.onerror = () => {
+      setListening(false);
+      setFallback(true);
+    };
+
+    recognition.onend = () => {
+      setListening(false);
+    };
+
+    recognition.start();
+  };
+
+  const stopVoice = () => {
+    if (recognitionRef.current) {
+      recognitionRef.current.stop();
+    }
+
+    setListening(false);
+    onTranscript(localTranscript);
+  };
+
   return (
-    <div className="grid gap-5 md:grid-cols-2">
-      {children}
+    <div className="w-full rounded-3xl bg-[#f5f3ee] p-4 md:max-w-sm">
+      <div className="font-semibold text-[#17395c]">Voice note</div>
+
+      <p className="mt-1 text-xs text-slate-500">
+        Works on Chrome/Android. On iPhone, use the manual box or keyboard microphone.
+      </p>
+
+      <div className="mt-4 flex gap-2">
+        {!listening ? (
+          <button
+            type="button"
+            onClick={startVoice}
+            className="flex-1 rounded-2xl bg-[#17395c] px-4 py-3 text-sm font-semibold text-white"
+          >
+            🎙 Start
+          </button>
+        ) : (
+          <button
+            type="button"
+            onClick={stopVoice}
+            className="flex-1 rounded-2xl bg-red-600 px-4 py-3 text-sm font-semibold text-white"
+          >
+            Stop & Fill
+          </button>
+        )}
+
+        <button
+          type="button"
+          onClick={() => onTranscript(localTranscript)}
+          className="rounded-2xl border border-slate-300 px-4 py-3 text-sm font-semibold"
+        >
+          Fill
+        </button>
+      </div>
+
+      {(fallback || localTranscript) && (
+        <textarea
+          value={localTranscript}
+          onChange={(e) => setLocalTranscript(e.target.value)}
+          className="mt-4 min-h-[120px] w-full rounded-2xl border border-slate-200 bg-white p-3 text-sm outline-none"
+          placeholder="Speak using your phone keyboard microphone or paste the transcript here..."
+        />
+      )}
     </div>
   );
+}
+
+function extractPropertyInfo(text) {
+  const t = text.toLowerCase();
+
+  const result = {};
+
+  if (t.includes("villa")) result.propertyType = "Villa";
+  else if (t.includes("apartment") || t.includes("apartamento")) result.propertyType = "Apartment";
+  else if (t.includes("penthouse") || t.includes("ático")) result.propertyType = "Penthouse";
+  else if (t.includes("townhouse") || t.includes("adosado")) result.propertyType = "Townhouse";
+  else if (t.includes("plot") || t.includes("solar")) result.propertyType = "Plot";
+  else if (t.includes("commercial") || t.includes("local")) result.propertyType = "Commercial";
+
+  if (t.includes("sale") || t.includes("venta")) result.operation = "Sale";
+  if (t.includes("rental") || t.includes("rent") || t.includes("alquiler")) result.operation = "Rental";
+
+  const priceMatch = text.match(/(?:€|eur|euros?)\s?([\d.,]+)/i) || text.match(/([\d.,]+)\s?(?:€|eur|euros?)/i);
+  if (priceMatch) result.price = normalizeNumber(priceMatch[1]);
+
+  const bedsMatch = text.match(/(\d+)\s?(?:bedrooms?|beds?|dormitorios?|habitaciones?)/i);
+  if (bedsMatch) result.bedrooms = bedsMatch[1];
+
+  const bathsMatch = text.match(/(\d+)\s?(?:bathrooms?|baths?|baños?)/i);
+  if (bathsMatch) result.bathrooms = bathsMatch[1];
+
+  const builtMatch = text.match(/(\d+)\s?(?:m2|m²|sqm|square meters?|metros construidos|built)/i);
+  if (builtMatch) result.surfaceSqm = builtMatch[1];
+
+  const plotMatch = text.match(/(\d+)\s?(?:m2|m²|sqm|square meters?|metros)\s?(?:plot|parcela)/i);
+  if (plotMatch) result.plotSqm = plotMatch[1];
+
+  const terraceMatch = text.match(/(\d+)\s?(?:m2|m²|sqm|square meters?|metros)\s?(?:terrace|terraza)/i);
+  if (terraceMatch) result.terraceSqm = terraceMatch[1];
+
+  const cities = ["Marbella", "Estepona", "Benahavis", "Benahavís", "Sotogrande", "Malaga", "Málaga", "Nueva Andalucia", "Nueva Andalucía"];
+  const foundCity = cities.find((city) => t.includes(city.toLowerCase()));
+  if (foundCity) result.city = foundCity;
+
+  const neighborhoods = ["Golden Mile", "Puente Romano", "Sierra Blanca", "Nueva Andalucía", "Puerto Banús", "La Zagaleta", "Elviria", "Los Monteros"];
+  const foundNeighborhood = neighborhoods.find((n) => t.includes(n.toLowerCase()));
+  if (foundNeighborhood) result.neighborhood = foundNeighborhood;
+
+  return result;
+}
+
+function normalizeNumber(value) {
+  return value.replace(/[^\d]/g, "");
+}
+
+function Grid({ children }) {
+  return <div className="grid gap-5 md:grid-cols-2">{children}</div>;
 }
 
 function Input({ label, value, onChange, type = "text" }) {
@@ -489,9 +658,7 @@ function Select({ label, value, onChange, options }) {
         <option value="">Select...</option>
 
         {options.map((o) => (
-          <option key={o}>
-            {o}
-          </option>
+          <option key={o}>{o}</option>
         ))}
       </select>
     </label>
@@ -505,7 +672,7 @@ function InfoCard({ label, value }) {
         {label}
       </div>
 
-      <div className="mt-2 font-semibold text-slate-900">
+      <div className="mt-2 break-words font-semibold text-slate-900">
         {value}
       </div>
     </div>
@@ -514,14 +681,9 @@ function InfoCard({ label, value }) {
 
 function ReviewRow({ label, value }) {
   return (
-    <div className="flex items-center justify-between border-b border-slate-100 pb-3 last:border-0">
-      <span className="font-medium text-slate-500">
-        {label}
-      </span>
-
-      <span className="font-semibold text-slate-900">
-        {value || "—"}
-      </span>
+    <div className="flex items-center justify-between gap-4 border-b border-slate-100 pb-3 last:border-0">
+      <span className="font-medium text-slate-500">{label}</span>
+      <span className="text-right font-semibold text-slate-900">{value || "—"}</span>
     </div>
   );
 }
