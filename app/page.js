@@ -1,298 +1,344 @@
-'use client';
+"use client";
 
-import { useMemo, useState } from 'react';
-import { AlertCircle, CheckCircle2, FileCheck, Home, Upload, User } from 'lucide-react';
+import { useMemo, useState } from "react";
 
-const requiredFields = [
-  'agentName',
-  'agentEmail',
-  'agentPhone',
-  'propertyTitle',
-  'propertyType',
-  'address',
-  'city',
-  'neighborhood',
-  'bedrooms',
-  'bathrooms',
-  'surfaceSqm',
-  'price',
-  'commission',
-  'ownerName',
-  'ownerPhone',
-  'ownerEmail'
-];
-
-const requiredDocs = [
-  { key: 'titleDeed', label: 'Title deed' },
-  { key: 'ownerId', label: 'Owner ID / Passport' },
-  { key: 'authorization', label: 'Signed authorization form' },
-  { key: 'photos', label: 'Property photos', multiple: true },
-  { key: 'floorplan', label: 'Floorplan' },
-  { key: 'energyCertificate', label: 'Energy certificate' }
-];
+const steps = ["Agent", "Owner", "Property", "Documents", "Review"];
 
 const initialForm = {
-  agentName: '',
-  agentEmail: '',
-  agentPhone: '',
-  propertyTitle: '',
-  propertyType: '',
-  address: '',
-  city: '',
-  neighborhood: '',
-  gpsLink: '',
-  bedrooms: '',
-  bathrooms: '',
-  surfaceSqm: '',
-  price: '',
-  commission: '',
-  ownerName: '',
-  ownerPhone: '',
-  ownerEmail: '',
-  ownershipStatus: '',
-  notes: ''
+  agentName: "",
+  agentEmail: "",
+  agentPhone: "",
+  ownerName: "",
+  ownerPhone: "",
+  ownerEmail: "",
+  ownershipStatus: "",
+  propertyTitle: "",
+  propertyType: "",
+  address: "",
+  city: "",
+  neighborhood: "",
+  gpsLink: "",
+  bedrooms: "3",
+  bathrooms: "2",
+  surfaceSqm: "",
+  price: "",
+  commission: "",
+  notes: "",
 };
 
+const requiredDocs = [
+  ["titleDeed", "Escritura / Title deed"],
+  ["ownerId", "DNI/NIE propietario / Owner ID"],
+  ["authorization", "Autorización firmada / Signed authorization"],
+  ["photos", "Fotos de la propiedad / Property photos"],
+  ["floorplan", "Plano / Floorplan"],
+  ["energyCertificate", "Certificado energético / Energy certificate"],
+];
+
 export default function Page() {
+  const [step, setStep] = useState(0);
   const [form, setForm] = useState(initialForm);
   const [files, setFiles] = useState({});
-  const [submitted, setSubmitted] = useState(false);
+  const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(false);
-  const [message, setMessage] = useState(null);
 
-  const missingFields = useMemo(
-    () => requiredFields.filter((field) => !String(form[field] || '').trim()),
-    [form]
-  );
+  const progress = Math.round(((step + 1) / steps.length) * 100);
 
-  const missingDocs = useMemo(
-    () => requiredDocs.filter((doc) => !files[doc.key] || files[doc.key].length === 0),
-    [files]
-  );
+  const missingDocs = requiredDocs.filter(([key]) => !files[key]?.length);
 
-  const isComplete = missingFields.length === 0 && missingDocs.length === 0;
+  const update = (key, value) => {
+    setForm((f) => ({ ...f, [key]: value }));
+  };
 
-  function updateField(key, value) {
-    setForm((current) => ({ ...current, [key]: value }));
-  }
+  const validateStep = () => {
+    const requiredByStep = {
+      0: ["agentName", "agentEmail", "agentPhone"],
+      1: ["ownerName", "ownerPhone", "ownerEmail"],
+      2: [
+        "propertyTitle",
+        "propertyType",
+        "address",
+        "city",
+        "neighborhood",
+        "bedrooms",
+        "bathrooms",
+        "surfaceSqm",
+        "price",
+        "commission",
+      ],
+    };
 
-  function updateFile(key, fileList) {
-    setFiles((current) => ({ ...current, [key]: Array.from(fileList || []) }));
-  }
+    const missing = (requiredByStep[step] || []).filter((k) => !String(form[k] || "").trim());
 
-  async function handleSubmit(event) {
-    event.preventDefault();
-    setSubmitted(true);
-    setMessage(null);
+    if (missing.length) {
+      setMessage("Please complete all required fields before continuing.");
+      return false;
+    }
 
-    if (!isComplete) {
-      setMessage({ type: 'error', text: 'Incomplete listing. Please add every required field and document.' });
+    if (step === 3 && missingDocs.length) {
+      setMessage("All required documents must be uploaded before continuing.");
+      return false;
+    }
+
+    setMessage("");
+    return true;
+  };
+
+  const next = () => {
+    if (!validateStep()) return;
+    setStep((s) => Math.min(s + 1, steps.length - 1));
+  };
+
+  const back = () => {
+    setMessage("");
+    setStep((s) => Math.max(s - 1, 0));
+  };
+
+  const submit = async () => {
+    setLoading(true);
+    setMessage("");
+
+    const data = new FormData();
+
+    Object.entries(form).forEach(([key, value]) => {
+      data.append(key, value);
+    });
+
+    Object.entries(files).forEach(([key, fileList]) => {
+      fileList.forEach((file) => data.append(key, file));
+    });
+
+    const res = await fetch("/api/listings", {
+      method: "POST",
+      body: data,
+    });
+
+    const json = await res.json();
+    setLoading(false);
+
+    if (!res.ok) {
+      setMessage(json.error || "Submission failed.");
       return;
     }
 
-    setLoading(true);
-
-    try {
-      const payload = new FormData();
-      Object.entries(form).forEach(([key, value]) => payload.append(key, value));
-
-      requiredDocs.forEach((doc) => {
-        (files[doc.key] || []).forEach((file) => payload.append(doc.key, file));
-      });
-
-      const response = await fetch('/api/listings', {
-        method: 'POST',
-        body: payload
-      });
-
-      const result = await response.json();
-
-      if (!response.ok) {
-        throw new Error(result.error || 'Submission failed.');
-      }
-
-      setMessage({ type: 'success', text: `Listing submitted. Status: ${result.status}` });
-      setForm(initialForm);
-      setFiles({});
-      setSubmitted(false);
-      event.currentTarget.reset();
-    } catch (error) {
-      setMessage({ type: 'error', text: error.message });
-    } finally {
-      setLoading(false);
-    }
-  }
+    setMessage("Listing submitted successfully. It is now ready for the pipeline.");
+  };
 
   return (
-    <main className="min-h-screen bg-slate-50 p-4 md:p-8">
-      <div className="mx-auto max-w-6xl">
-        <header className="mb-8 flex items-center gap-3">
-          <div className="rounded-2xl bg-slate-900 p-3 text-white shadow-sm">
-            <Home className="h-6 w-6" />
+    <main className="min-h-screen bg-[#f5f3ee] px-4 py-8 text-slate-900">
+      <div className="mx-auto max-w-3xl">
+        <header className="rounded-3xl bg-[#17395c] p-6 text-white shadow-lg">
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <h1 className="text-2xl font-semibold">Alta de Propiedad</h1>
+              <p className="mt-1 text-sm text-white/75">Property Intake Form</p>
+            </div>
+            <div className="text-right text-sm text-white/75">
+              Step {step + 1} of {steps.length}
+            </div>
           </div>
-          <div>
-            <h1 className="text-3xl font-semibold tracking-tight text-slate-900">Property Intake Form</h1>
-            <p className="mt-1 text-slate-600">Agents must submit all required information and documents.</p>
+
+          <div className="mt-5 h-2 rounded-full bg-white/20">
+            <div
+              className="h-2 rounded-full bg-emerald-400 transition-all"
+              style={{ width: `${progress}%` }}
+            />
+          </div>
+
+          <div className="mt-4 grid grid-cols-5 gap-2">
+            {steps.map((s, i) => (
+              <div
+                key={s}
+                className={`rounded-full py-2 text-center text-xs ${
+                  i === step ? "bg-white text-[#17395c]" : i < step ? "bg-emerald-400 text-[#17395c]" : "bg-white/10"
+                }`}
+              >
+                {s}
+              </div>
+            ))}
           </div>
         </header>
 
-        <div className="grid gap-6 lg:grid-cols-[1fr_340px]">
-          <form onSubmit={handleSubmit} className="space-y-6">
-            <Section title="Agent Information" icon={<User className="h-5 w-5" />}>
-              <Input label="Agent name" value={form.agentName} onChange={(v) => updateField('agentName', v)} required />
-              <Input label="Agent email" type="email" value={form.agentEmail} onChange={(v) => updateField('agentEmail', v)} required />
-              <Input label="Agent phone" value={form.agentPhone} onChange={(v) => updateField('agentPhone', v)} required />
-            </Section>
+        {message && (
+          <div className="mt-5 rounded-2xl bg-white p-4 text-sm font-medium text-[#17395c] shadow">
+            {message}
+          </div>
+        )}
 
-            <Section title="Property Information" icon={<Home className="h-5 w-5" />}>
-              <Input label="Property title" value={form.propertyTitle} onChange={(v) => updateField('propertyTitle', v)} required />
-              <Select label="Property type" value={form.propertyType} onChange={(v) => updateField('propertyType', v)} required options={['Apartment', 'Villa', 'Townhouse', 'Land', 'Commercial', 'Other']} />
-              <Input label="Address" value={form.address} onChange={(v) => updateField('address', v)} required />
-              <Input label="City" value={form.city} onChange={(v) => updateField('city', v)} required />
-              <Input label="Neighborhood" value={form.neighborhood} onChange={(v) => updateField('neighborhood', v)} required />
-              <Input label="Google Maps / GPS link" value={form.gpsLink} onChange={(v) => updateField('gpsLink', v)} />
-              <Input label="Bedrooms" type="number" value={form.bedrooms} onChange={(v) => updateField('bedrooms', v)} required />
-              <Input label="Bathrooms" type="number" value={form.bathrooms} onChange={(v) => updateField('bathrooms', v)} required />
-              <Input label="Surface area sqm" type="number" value={form.surfaceSqm} onChange={(v) => updateField('surfaceSqm', v)} required />
-              <Input label="Asking price" type="number" value={form.price} onChange={(v) => updateField('price', v)} required />
-              <Input label="Commission" value={form.commission} onChange={(v) => updateField('commission', v)} required />
-            </Section>
+        <section className="mt-6 rounded-3xl bg-white p-6 shadow">
+          {step === 0 && (
+            <Step title="1. Agente / Agent">
+              <Grid>
+                <Input label="Nombre del agente / Agent name *" value={form.agentName} onChange={(v) => update("agentName", v)} />
+                <Input label="Email del agente / Agent email *" type="email" value={form.agentEmail} onChange={(v) => update("agentEmail", v)} />
+                <Input label="Teléfono / Phone *" value={form.agentPhone} onChange={(v) => update("agentPhone", v)} />
+              </Grid>
+            </Step>
+          )}
 
-            <Section title="Owner Information" icon={<User className="h-5 w-5" />}>
-              <Input label="Owner full name" value={form.ownerName} onChange={(v) => updateField('ownerName', v)} required />
-              <Input label="Owner phone" value={form.ownerPhone} onChange={(v) => updateField('ownerPhone', v)} required />
-              <Input label="Owner email" type="email" value={form.ownerEmail} onChange={(v) => updateField('ownerEmail', v)} required />
-              <Select label="Ownership status" value={form.ownershipStatus} onChange={(v) => updateField('ownershipStatus', v)} options={['Single owner', 'Multiple owners', 'Company owned', 'Power of attorney', 'Other']} />
-            </Section>
+          {step === 1 && (
+            <Step title="2. Propietario / Owner">
+              <Grid>
+                <Input label="Nombre propietario / Owner name *" value={form.ownerName} onChange={(v) => update("ownerName", v)} />
+                <Input label="Teléfono propietario / Owner phone *" value={form.ownerPhone} onChange={(v) => update("ownerPhone", v)} />
+                <Input label="Email propietario / Owner email *" type="email" value={form.ownerEmail} onChange={(v) => update("ownerEmail", v)} />
+                <Select
+                  label="Ownership status"
+                  value={form.ownershipStatus}
+                  onChange={(v) => update("ownershipStatus", v)}
+                  options={["Single owner", "Multiple owners", "Company owned", "Power of attorney"]}
+                />
+              </Grid>
+            </Step>
+          )}
 
-            <Section title="Required Documentation" icon={<FileCheck className="h-5 w-5" />}>
-              {requiredDocs.map((doc) => (
-                <FileInput key={doc.key} label={doc.label} onChange={(fileList) => updateFile(doc.key, fileList)} required multiple={doc.multiple} />
-              ))}
-            </Section>
+          {step === 2 && (
+            <Step title="3. Detalles de la propiedad / Property Details">
+              <Grid>
+                <Input label="Título / Property title *" value={form.propertyTitle} onChange={(v) => update("propertyTitle", v)} />
+                <Select
+                  label="Tipo / Type *"
+                  value={form.propertyType}
+                  onChange={(v) => update("propertyType", v)}
+                  options={["Villa", "Apartment", "Penthouse", "Townhouse", "Land", "Commercial"]}
+                />
+                <Input label="Dirección / Address *" value={form.address} onChange={(v) => update("address", v)} />
+                <Input label="Ciudad / City *" value={form.city} onChange={(v) => update("city", v)} />
+                <Input label="Zona / Neighborhood *" value={form.neighborhood} onChange={(v) => update("neighborhood", v)} />
+                <Input label="GPS / Maps link" value={form.gpsLink} onChange={(v) => update("gpsLink", v)} />
+                <Input label="Dormitorios / Bedrooms *" type="number" value={form.bedrooms} onChange={(v) => update("bedrooms", v)} />
+                <Input label="Baños / Bathrooms *" type="number" value={form.bathrooms} onChange={(v) => update("bathrooms", v)} />
+                <Input label="M² construidos / Built sqm *" type="number" value={form.surfaceSqm} onChange={(v) => update("surfaceSqm", v)} />
+                <Input label="Precio / Price € *" type="number" value={form.price} onChange={(v) => update("price", v)} />
+                <Input label="Comisión / Commission *" value={form.commission} onChange={(v) => update("commission", v)} />
+              </Grid>
+            </Step>
+          )}
 
-            <Card>
-              <label className="text-sm font-medium text-slate-700">Internal notes</label>
-              <textarea
-                value={form.notes}
-                onChange={(e) => updateField('notes', e.target.value)}
-                rows={4}
-                className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none transition focus:border-slate-400"
-                placeholder="Anything the listing manager should know..."
-              />
-            </Card>
-
-            {message && <Alert type={message.type}>{message.text}</Alert>}
-
-            <button disabled={loading} type="submit" className="w-full rounded-2xl bg-slate-900 px-5 py-4 text-base font-semibold text-white shadow-sm transition hover:bg-slate-700 disabled:opacity-50">
-              {loading ? 'Submitting...' : 'Submit Listing'}
-            </button>
-          </form>
-
-          <aside className="lg:sticky lg:top-8 lg:self-start">
-            <Card>
-              <h2 className="text-lg font-semibold text-slate-900">Submission Status</h2>
-              <div className="mt-4 rounded-2xl bg-slate-100 p-4">
-                <div className="flex items-center justify-between">
-                  <span className="text-sm text-slate-600">Current status</span>
-                  <span className={`rounded-full px-3 py-1 text-xs font-medium ${isComplete ? 'bg-green-100 text-green-800' : 'bg-amber-100 text-amber-800'}`}>
-                    {isComplete ? 'READY' : 'INCOMPLETE'}
-                  </span>
-                </div>
+          {step === 3 && (
+            <Step title="4. Documentación requerida / Required Documents">
+              <div className="mb-4 rounded-2xl bg-red-50 p-4 text-sm text-red-800">
+                All documents are mandatory. Missing documents = no pipeline entry.
               </div>
-              <ChecklistBlock title="Missing fields" items={missingFields.map(fieldLabel)} emptyText="All required fields added." showErrors={submitted} />
-              <ChecklistBlock title="Missing documents" items={missingDocs.map((doc) => doc.label)} emptyText="All required documents uploaded." showErrors={submitted} />
-            </Card>
-          </aside>
-        </div>
+
+              <div className="space-y-3">
+                {requiredDocs.map(([key, label]) => (
+                  <label key={key} className="flex cursor-pointer items-center justify-between gap-4 rounded-2xl border border-slate-200 bg-[#faf9f5] p-4">
+                    <div>
+                      <div className="font-medium">{label}</div>
+                      <div className="text-xs text-slate-500">{files[key]?.length ? `${files[key].length} file(s) selected` : "PDF, image or document"}</div>
+                    </div>
+                    <input
+                      type="file"
+                      multiple={key === "photos"}
+                      className="max-w-[180px] text-xs"
+                      onChange={(e) => setFiles((f) => ({ ...f, [key]: Array.from(e.target.files || []) }))}
+                    />
+                  </label>
+                ))}
+              </div>
+            </Step>
+          )}
+
+          {step === 4 && (
+            <Step title="5. Review & Submit">
+              <Review form={form} missingDocs={missingDocs} />
+              <textarea
+                className="mt-5 min-h-[100px] w-full rounded-2xl border border-slate-200 bg-[#faf9f5] p-4 outline-none focus:border-[#17395c]"
+                placeholder="Notas adicionales / Additional notes"
+                value={form.notes}
+                onChange={(e) => update("notes", e.target.value)}
+              />
+            </Step>
+          )}
+
+          <div className="mt-6 flex gap-3">
+            {step > 0 && (
+              <button onClick={back} className="flex-1 rounded-2xl border border-slate-300 bg-white px-5 py-3 font-medium">
+                Back
+              </button>
+            )}
+
+            {step < steps.length - 1 ? (
+              <button onClick={next} className="flex-1 rounded-2xl bg-[#17395c] px-5 py-3 font-medium text-white">
+                Continue
+              </button>
+            ) : (
+              <button onClick={submit} disabled={loading} className="flex-1 rounded-2xl bg-emerald-600 px-5 py-3 font-medium text-white disabled:opacity-50">
+                {loading ? "Submitting..." : "Submit to Pipeline"}
+              </button>
+            )}
+          </div>
+        </section>
       </div>
     </main>
   );
 }
 
-function Section({ title, icon, children }) {
+function Step({ title, children }) {
   return (
-    <Card>
-      <div className="mb-5 flex items-center gap-2 text-slate-900">
-        {icon}
-        <h2 className="text-xl font-semibold">{title}</h2>
-      </div>
-      <div className="grid gap-4 md:grid-cols-2">{children}</div>
-    </Card>
+    <div>
+      <h2 className="mb-5 text-lg font-semibold text-[#17395c]">{title}</h2>
+      {children}
+    </div>
   );
 }
 
-function Card({ children }) {
-  return <div className="rounded-2xl border border-slate-100 bg-white p-5 shadow-sm">{children}</div>;
+function Grid({ children }) {
+  return <div className="grid gap-4 md:grid-cols-2">{children}</div>;
 }
 
-function Input({ label, value, onChange, type = 'text', required = false }) {
+function Input({ label, value, onChange, type = "text" }) {
   return (
     <label className="block">
-      <span className="text-sm font-medium text-slate-700">{label}{required ? ' *' : ''}</span>
-      <input type={type} value={value} onChange={(e) => onChange(e.target.value)} className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none transition focus:border-slate-400" required={required} />
+      <span className="mb-2 block text-sm font-medium text-slate-700">{label}</span>
+      <input
+        type={type}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="w-full rounded-2xl border border-slate-200 bg-[#faf9f5] px-4 py-3 outline-none focus:border-[#17395c]"
+      />
     </label>
   );
 }
 
-function Select({ label, value, onChange, options, required = false }) {
+function Select({ label, value, onChange, options }) {
   return (
     <label className="block">
-      <span className="text-sm font-medium text-slate-700">{label}{required ? ' *' : ''}</span>
-      <select value={value} onChange={(e) => onChange(e.target.value)} className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none transition focus:border-slate-400" required={required}>
+      <span className="mb-2 block text-sm font-medium text-slate-700">{label}</span>
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="w-full rounded-2xl border border-slate-200 bg-[#faf9f5] px-4 py-3 outline-none focus:border-[#17395c]"
+      >
         <option value="">Select...</option>
-        {options.map((option) => <option key={option} value={option}>{option}</option>)}
+        {options.map((o) => (
+          <option key={o}>{o}</option>
+        ))}
       </select>
     </label>
   );
 }
 
-function FileInput({ label, onChange, required = false, multiple = false }) {
+function Review({ form, missingDocs }) {
+  const rows = [
+    ["Agent", form.agentName],
+    ["Owner", form.ownerName],
+    ["Property", form.propertyTitle],
+    ["Type", form.propertyType],
+    ["Address", `${form.address}, ${form.city}`],
+    ["Price", form.price ? `€${Number(form.price).toLocaleString("es-ES")}` : ""],
+    ["Documents", missingDocs.length ? `${missingDocs.length} missing` : "All uploaded"],
+  ];
+
   return (
-    <label className="block rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-4 transition hover:bg-slate-100">
-      <div className="flex items-start gap-3">
-        <Upload className="mt-0.5 h-5 w-5 text-slate-500" />
-        <div>
-          <span className="text-sm font-medium text-slate-700">{label}{required ? ' *' : ''}</span>
-          <p className="mt-1 text-xs text-slate-500">Upload PDF, JPG, PNG, or document files.</p>
+    <div className="overflow-hidden rounded-2xl border border-slate-200">
+      {rows.map(([label, value]) => (
+        <div key={label} className="grid grid-cols-3 border-b border-slate-100 last:border-0">
+          <div className="bg-[#faf9f5] p-3 text-sm font-medium text-slate-500">{label}</div>
+          <div className="col-span-2 p-3 text-sm font-semibold">{value || "—"}</div>
         </div>
-      </div>
-      <input type="file" multiple={multiple} onChange={(e) => onChange(e.target.files)} className="mt-3 w-full text-sm text-slate-600" required={required} />
-    </label>
-  );
-}
-
-function Alert({ type, children }) {
-  return (
-    <div className={`rounded-2xl p-4 text-sm ${type === 'success' ? 'bg-green-50 text-green-800' : 'bg-red-50 text-red-800'}`}>
-      <div className="flex items-center gap-2">
-        {type === 'success' ? <CheckCircle2 className="h-5 w-5" /> : <AlertCircle className="h-5 w-5" />}
-        <span>{children}</span>
-      </div>
+      ))}
     </div>
   );
-}
-
-function ChecklistBlock({ title, items, emptyText, showErrors }) {
-  return (
-    <div className="mt-5">
-      <h3 className="text-sm font-semibold text-slate-900">{title}</h3>
-      <div className="mt-2 space-y-2">
-        {items.length === 0 ? (
-          <div className="flex items-center gap-2 text-sm text-green-700"><CheckCircle2 className="h-4 w-4" />{emptyText}</div>
-        ) : showErrors ? (
-          items.map((item) => <div key={item} className="flex items-center gap-2 text-sm text-red-700"><AlertCircle className="h-4 w-4" />{item}</div>)
-        ) : (
-          <p className="text-sm text-slate-500">Submit to check completeness.</p>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function fieldLabel(field) {
-  const labels = {
-    agentName: 'Agent name', agentEmail: 'Agent email', agentPhone: 'Agent phone', propertyTitle: 'Property title', propertyType: 'Property type', address: 'Address', city: 'City', neighborhood: 'Neighborhood', bedrooms: 'Bedrooms', bathrooms: 'Bathrooms', surfaceSqm: 'Surface area sqm', price: 'Asking price', commission: 'Commission', ownerName: 'Owner full name', ownerPhone: 'Owner phone', ownerEmail: 'Owner email'
-  };
-  return labels[field] || field;
 }
