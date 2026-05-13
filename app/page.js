@@ -100,6 +100,13 @@ export default function Page() {
     setMessageType(type);
   };
 
+  const scrollToTop = () => {
+    window.scrollTo({
+      top: 0,
+      behavior: "smooth",
+    });
+  };
+
   const addFiles = (key, selectedFiles) => {
     setFiles((current) => ({
       ...current,
@@ -176,6 +183,11 @@ export default function Page() {
 
     if (targetStep < step) {
       setStep(targetStep);
+
+      setTimeout(() => {
+        scrollToTop();
+      }, 50);
+
       return;
     }
 
@@ -215,13 +227,26 @@ export default function Page() {
     }
 
     setStep(targetStep);
+
+    setTimeout(() => {
+      scrollToTop();
+    }, 50);
   };
 
   const next = () => validateAndGo(step + 1);
 
   const back = () => {
     showMessage("", "info");
-    setStep((s) => Math.max(s - 1, 0));
+
+    setStep((s) => {
+      const previousStep = Math.max(s - 1, 0);
+
+      setTimeout(() => {
+        scrollToTop();
+      }, 50);
+
+      return previousStep;
+    });
   };
 
   const submit = async () => {
