@@ -50,9 +50,7 @@ const requiredDocs = [
   ["energyCertificate", "Certificado energético / Energy certificate"],
 ];
 
-const optionalDocs = [
-  ["video", "Vídeo de la propiedad / Property video"],
-];
+const optionalDocs = [["video", "Vídeo de la propiedad / Property video"]];
 
 const initialForm = {
   sourceType: "",
@@ -229,47 +227,123 @@ export default function Page() {
   const submit = async () => {
     try {
       setLoading(true);
-      showMessage("", "info");
 
-      const body = new FormData();
+      if (!process.env.NEXT_PUBLIC_SUPABASE_URL) {
+        throw new Error("Missing NEXT_PUBLIC_SUPABASE_URL environment variable.");
+      }
 
-      Object.entries(form).forEach(([key, value]) => {
-        body.append(key, value || "");
-      });
+      showMessage("Preparing secure uploads...", "info");
 
-      Object.entries(files).forEach(([key, fileList]) => {
+      const uploadItems = [];
+
+      Object.entries(files).forEach(([fileKey, fileList]) => {
         (fileList || []).forEach((file) => {
-          body.append(key, file, file.name);
+          uploadItems.push({
+            fileKey,
+            file,
+            name: file.name,
+            type: file.type || "application/octet-stream",
+            size: file.size,
+          });
         });
       });
 
       voiceNotes.forEach((note) => {
-        body.append("voiceNotes", note.file, note.file.name);
+        uploadItems.push({
+          fileKey: "voiceNotes",
+          file: note.file,
+          name: note.file.name,
+          type: note.file.type || "application/octet-stream",
+          size: note.file.size,
+        });
       });
 
-      const res = await fetch("/api/listings", {
+      const prepareResponse = await fetch("/api/uploads/create", {
         method: "POST",
-        body,
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          files: uploadItems.map(({ fileKey, name, type, size }) => ({
+            fileKey,
+            name,
+            type,
+            size,
+          })),
+        }),
       });
 
-      const json = await res.json().catch(() => ({}));
+      const prepareJson = await prepareResponse.json().catch(() => ({}));
 
-      if (!res.ok) {
-        const missingFields = json.missingFields?.length
-          ? ` Missing fields: ${json.missingFields.join(", ")}.`
+      if (!prepareResponse.ok) {
+        throw new Error(prepareJson.error || "Could not prepare file uploads.");
+      }
+
+      const uploadedFileMetadata = [];
+
+      for (let i = 0; i < prepareJson.files.length; i += 1) {
+        const signedFile = prepareJson.files[i];
+        const originalFile = uploadItems[i].file;
+
+        showMessage(`Uploading ${i + 1} of ${prepareJson.files.length}: ${originalFile.name}`, "info");
+
+        const uploadResponse = await fetch(
+          `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/upload/sign/property-documents/${signedFile.path}?token=${signedFile.token}`,
+          {
+            method: "PUT",
+            headers: {
+              "Content-Type": originalFile.type || "application/octet-stream",
+            },
+            body: originalFile,
+          }
+        );
+
+        if (!uploadResponse.ok) {
+          const uploadErrorText = await uploadResponse.text().catch(() => "");
+          throw new Error(`Upload failed for ${originalFile.name}. ${uploadErrorText}`);
+        }
+
+        uploadedFileMetadata.push({
+          document_type: signedFile.fileKey,
+          file_name: signedFile.name,
+          storage_path: signedFile.path,
+          mime_type: signedFile.type,
+          size_bytes: signedFile.size,
+        });
+      }
+
+      showMessage("Saving listing to Supabase...", "info");
+
+      const listingResponse = await fetch("/api/listings", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          propertyId: prepareJson.propertyId,
+          form,
+          files: uploadedFileMetadata,
+        }),
+      });
+
+      const listingJson = await listingResponse.json().catch(() => ({}));
+
+      if (!listingResponse.ok) {
+        const missingFields = listingJson.missingFields?.length
+          ? ` Missing fields: ${listingJson.missingFields.join(", ")}.`
           : "";
 
-        const missingDocs = json.missingDocs?.length
-          ? ` Missing documents: ${json.missingDocs.join(", ")}.`
+        const missingDocs = listingJson.missingDocs?.length
+          ? ` Missing documents: ${listingJson.missingDocs.join(", ")}.`
           : "";
 
         throw new Error(
-          `${json.error || "Submission failed."}${missingFields}${missingDocs}`
+          `${listingJson.error || "Submission failed."}${missingFields}${missingDocs}`
         );
       }
 
       showMessage(
-        json.message || "Property successfully submitted to the pipeline.",
+        listingJson.message || "Property successfully submitted to the pipeline.",
         "success"
       );
 
@@ -459,21 +533,8 @@ export default function Page() {
 
               <Grid>
                 <Input label="Property Title" value={form.propertyTitle} onChange={(v) => update("propertyTitle", v)} />
-
-                <Select
-                  label="Property Type"
-                  value={form.propertyType}
-                  onChange={(v) => update("propertyType", v)}
-                  options={["Villa", "Apartment", "Penthouse", "Townhouse", "Plot", "Commercial"]}
-                />
-
-                <Select
-                  label="Operation"
-                  value={form.operation}
-                  onChange={(v) => update("operation", v)}
-                  options={["Sale", "Rental", "Both"]}
-                />
-
+                <Select label="Property Type" value={form.propertyType} onChange={(v) => update("propertyType", v)} options={["Villa", "Apartment", "Penthouse", "Townhouse", "Plot", "Commercial"]} />
+                <Select label="Operation" value={form.operation} onChange={(v) => update("operation", v)} options={["Sale", "Rental", "Both"]} />
                 <Input label="Address" value={form.address} onChange={(v) => update("address", v)} />
                 <Input label="City" value={form.city} onChange={(v) => update("city", v)} />
                 <Input label="Neighborhood" value={form.neighborhood} onChange={(v) => update("neighborhood", v)} />
@@ -498,17 +559,6 @@ export default function Page() {
                   placeholder="After processing voice notes, a cleaned property description will appear here..."
                 />
               </label>
-
-              {form.voiceTranscript && (
-                <details className="mt-4 rounded-2xl bg-[#eef6fa] p-4 text-sm">
-                  <summary className="cursor-pointer font-semibold text-[#12385b]">
-                    View raw combined transcript
-                  </summary>
-                  <p className="mt-3 whitespace-pre-wrap text-slate-600">
-                    {form.voiceTranscript}
-                  </p>
-                </details>
-              )}
             </section>
           )}
 
@@ -517,8 +567,7 @@ export default function Page() {
               <SectionTitle title="Required Documents & Media" />
 
               <div className="mb-6 rounded-2xl bg-red-50 p-4 text-sm text-red-700">
-                All required documents are mandatory. Photos and video support
-                multiple files.
+                All required documents are mandatory. Photos and video support multiple files.
               </div>
 
               <div className="space-y-4">
@@ -569,30 +618,17 @@ export default function Page() {
 
           <div className="mt-10 flex flex-col gap-3 md:flex-row">
             {step > 0 && (
-              <button
-                type="button"
-                onClick={back}
-                className="rounded-2xl border border-[#d9e4ea] px-6 py-4 font-semibold text-[#12385b]"
-              >
+              <button type="button" onClick={back} className="rounded-2xl border border-[#d9e4ea] px-6 py-4 font-semibold text-[#12385b]">
                 Back
               </button>
             )}
 
             {step < steps.length - 1 ? (
-              <button
-                type="button"
-                onClick={next}
-                className="flex-1 rounded-2xl bg-[#12385b] px-6 py-4 font-semibold text-white transition hover:bg-[#164a73]"
-              >
+              <button type="button" onClick={next} className="flex-1 rounded-2xl bg-[#12385b] px-6 py-4 font-semibold text-white transition hover:bg-[#164a73]">
                 Continue
               </button>
             ) : (
-              <button
-                type="button"
-                onClick={submit}
-                disabled={loading}
-                className="flex-1 rounded-2xl bg-[#12385b] px-6 py-4 font-semibold text-white transition hover:bg-[#164a73] disabled:opacity-50"
-              >
+              <button type="button" onClick={submit} disabled={loading} className="flex-1 rounded-2xl bg-[#12385b] px-6 py-4 font-semibold text-white transition hover:bg-[#164a73] disabled:opacity-50">
                 {loading ? "Submitting..." : "Submit to Pipeline"}
               </button>
             )}
@@ -628,9 +664,7 @@ function VoiceNotesBox({ voiceNotes, setVoiceNotes, onProcess, processing }) {
       chunksRef.current = [];
 
       recorder.ondataavailable = (event) => {
-        if (event.data.size > 0) {
-          chunksRef.current.push(event.data);
-        }
+        if (event.data.size > 0) chunksRef.current.push(event.data);
       };
 
       recorder.onstop = () => {
@@ -656,7 +690,7 @@ function VoiceNotesBox({ voiceNotes, setVoiceNotes, onProcess, processing }) {
 
       recorder.start();
       setRecording(true);
-    } catch (err) {
+    } catch {
       setError("Microphone access failed. Please allow microphone permissions and try again.");
     }
   };
@@ -673,26 +707,17 @@ function VoiceNotesBox({ voiceNotes, setVoiceNotes, onProcess, processing }) {
   return (
     <div className="w-full rounded-3xl bg-[#eef6fa] p-4 md:max-w-sm">
       <div className="font-semibold text-[#12385b]">Voice notes</div>
-
       <p className="mt-1 text-xs text-slate-500">
         Record one or more audio notes. Stop manually when finished.
       </p>
 
       <div className="mt-4 flex gap-2">
         {!recording ? (
-          <button
-            type="button"
-            onClick={startRecording}
-            className="flex-1 rounded-2xl bg-[#12385b] px-4 py-3 text-sm font-semibold text-white"
-          >
+          <button type="button" onClick={startRecording} className="flex-1 rounded-2xl bg-[#12385b] px-4 py-3 text-sm font-semibold text-white">
             🎙 Start Recording
           </button>
         ) : (
-          <button
-            type="button"
-            onClick={stopRecording}
-            className="flex-1 rounded-2xl bg-red-600 px-4 py-3 text-sm font-semibold text-white"
-          >
+          <button type="button" onClick={stopRecording} className="flex-1 rounded-2xl bg-red-600 px-4 py-3 text-sm font-semibold text-white">
             Stop
           </button>
         )}
@@ -708,26 +733,15 @@ function VoiceNotesBox({ voiceNotes, setVoiceNotes, onProcess, processing }) {
                 <div className="text-sm font-semibold text-slate-800">
                   Voice Note {index + 1}
                 </div>
-
-                <button
-                  type="button"
-                  onClick={() => deleteNote(note.id)}
-                  className="text-xs font-semibold text-red-600"
-                >
+                <button type="button" onClick={() => deleteNote(note.id)} className="text-xs font-semibold text-red-600">
                   Delete
                 </button>
               </div>
-
               <audio controls src={note.url} className="w-full" />
             </div>
           ))}
 
-          <button
-            type="button"
-            onClick={onProcess}
-            disabled={processing}
-            className="w-full rounded-2xl bg-[#d8c59b] px-4 py-3 text-sm font-semibold text-[#12385b] disabled:opacity-50"
-          >
+          <button type="button" onClick={onProcess} disabled={processing} className="w-full rounded-2xl bg-[#d8c59b] px-4 py-3 text-sm font-semibold text-[#12385b] disabled:opacity-50">
             {processing ? "Processing..." : "Transcribe & Auto-fill"}
           </button>
         </div>
@@ -763,16 +777,9 @@ function FileUploadRow({ fileKey, label, files, required, onAddFiles, onRemoveFi
       {files.length > 0 && (
         <div className="mt-4 space-y-2">
           {files.map((file, index) => (
-            <div
-              key={`${file.name}-${index}`}
-              className="flex items-center justify-between gap-3 rounded-xl bg-white px-4 py-3 text-sm shadow-sm"
-            >
+            <div key={`${file.name}-${index}`} className="flex items-center justify-between gap-3 rounded-xl bg-white px-4 py-3 text-sm shadow-sm">
               <span className="truncate">{file.name}</span>
-              <button
-                type="button"
-                onClick={() => onRemoveFile(fileKey, index)}
-                className="shrink-0 font-semibold text-red-600"
-              >
+              <button type="button" onClick={() => onRemoveFile(fileKey, index)} className="shrink-0 font-semibold text-red-600">
                 Remove
               </button>
             </div>
@@ -804,9 +811,7 @@ function ChoiceCard({ active, title, text, onClick }) {
       type="button"
       onClick={onClick}
       className={`rounded-3xl border p-6 text-left transition ${
-        active
-          ? "border-[#2f7698] bg-[#eef6fa] shadow-md"
-          : "border-[#d9e4ea] bg-[#fbfaf7]"
+        active ? "border-[#2f7698] bg-[#eef6fa] shadow-md" : "border-[#d9e4ea] bg-[#fbfaf7]"
       }`}
     >
       <div className="text-lg font-semibold text-[#12385b]">{title}</div>
@@ -821,7 +826,6 @@ function Input({ label, value, onChange, type = "text" }) {
       <span className="mb-2 block text-sm font-semibold text-slate-700">
         {label}
       </span>
-
       <input
         type={type}
         value={value}
@@ -838,14 +842,12 @@ function Select({ label, value, onChange, options }) {
       <span className="mb-2 block text-sm font-semibold text-slate-700">
         {label}
       </span>
-
       <select
         value={value}
         onChange={(e) => onChange(e.target.value)}
         className="w-full rounded-2xl border border-[#d9e4ea] bg-[#fbfaf7] px-5 py-4 outline-none transition focus:border-[#2f7698]"
       >
         <option value="">Select...</option>
-
         {options.map((o) => (
           <option key={o}>{o}</option>
         ))}
@@ -860,7 +862,6 @@ function InfoCard({ label, value }) {
       <div className="text-xs uppercase tracking-wide text-slate-400">
         {label}
       </div>
-
       <div className="mt-2 break-words font-semibold text-slate-900">
         {value}
       </div>
@@ -872,9 +873,7 @@ function ReviewRow({ label, value }) {
   return (
     <div className="flex items-center justify-between gap-4 border-b border-slate-100 pb-3 last:border-0">
       <span className="font-medium text-slate-500">{label}</span>
-      <span className="text-right font-semibold text-slate-900">
-        {value || "—"}
-      </span>
+      <span className="text-right font-semibold text-slate-900">{value || "—"}</span>
     </div>
   );
 }
