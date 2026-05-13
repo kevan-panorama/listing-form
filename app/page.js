@@ -51,6 +51,7 @@ const requiredDocs = [
 ];
 
 const initialForm = {
+  sourceType: "",
   agentName: "",
   agentEmail: "",
   agentPhone: "",
@@ -65,6 +66,7 @@ const initialForm = {
   neighborhood: "",
   bedrooms: "",
   bathrooms: "",
+  guestToilets: "",
   surfaceSqm: "",
   plotSqm: "",
   terraceSqm: "",
@@ -94,6 +96,7 @@ export default function Page() {
     setForm((f) => ({
       ...f,
       voiceTranscript: text,
+      propertyTitle: extracted.propertyTitle || f.propertyTitle,
       propertyType: extracted.propertyType || f.propertyType,
       operation: extracted.operation || f.operation,
       city: extracted.city || f.city,
@@ -101,6 +104,7 @@ export default function Page() {
       address: extracted.address || f.address,
       bedrooms: extracted.bedrooms || f.bedrooms,
       bathrooms: extracted.bathrooms || f.bathrooms,
+      guestToilets: extracted.guestToilets || f.guestToilets,
       surfaceSqm: extracted.surfaceSqm || f.surfaceSqm,
       plotSqm: extracted.plotSqm || f.plotSqm,
       terraceSqm: extracted.terraceSqm || f.terraceSqm,
@@ -119,24 +123,17 @@ export default function Page() {
       return;
     }
 
-    if (step === 0 && !form.agentEmail) {
-      setMessage("Please select an agent.");
+    if (step === 0 && (!form.sourceType || !form.agentEmail)) {
+      setMessage("Please select listing source and agent.");
       return;
     }
 
-    if (step === 1 && (!form.ownerName || !form.ownerPhone || !form.ownerEmail)) {
+    if (step === 1 && form.sourceType === "Owner Direct" && (!form.ownerName || !form.ownerPhone || !form.ownerEmail)) {
       setMessage("Please complete owner information.");
       return;
     }
 
-    if (
-      step === 2 &&
-      (!form.propertyTitle ||
-        !form.propertyType ||
-        !form.address ||
-        !form.city ||
-        !form.price)
-    ) {
+    if (step === 2 && (!form.propertyTitle || !form.propertyType || !form.address || !form.city || !form.price)) {
       setMessage("Please complete all required property fields.");
       return;
     }
@@ -242,8 +239,50 @@ export default function Page() {
           {step === 0 && (
             <section>
               <h2 className="mb-6 text-2xl font-bold text-[#17395c]">
-                Select Agent
+                Listing Source & Agent
               </h2>
+
+              <div className="mb-6 grid gap-4 md:grid-cols-2">
+                <button
+                  type="button"
+                  onClick={() => update("sourceType", "Owner Direct")}
+                  className={`rounded-3xl border p-6 text-left transition ${
+                    form.sourceType === "Owner Direct"
+                      ? "border-emerald-500 bg-emerald-50"
+                      : "border-slate-200 bg-[#faf9f5]"
+                  }`}
+                >
+                  <div className="text-lg font-bold text-[#17395c]">
+                    Direct Owner
+                  </div>
+                  <div className="mt-2 text-sm text-slate-500">
+                    The property comes directly from the owner.
+                  </div>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => update("sourceType", "Agency")}
+                  className={`rounded-3xl border p-6 text-left transition ${
+                    form.sourceType === "Agency"
+                      ? "border-emerald-500 bg-emerald-50"
+                      : "border-slate-200 bg-[#faf9f5]"
+                  }`}
+                >
+                  <div className="text-lg font-bold text-[#17395c]">
+                    Agency
+                  </div>
+                  <div className="mt-2 text-sm text-slate-500">
+                    The property comes from another agency.
+                  </div>
+                </button>
+              </div>
+
+              {form.sourceType === "Agency" && (
+                <div className="mb-6 rounded-2xl bg-amber-50 p-4 text-sm font-medium text-amber-800">
+                  Agency route will be configured later. For now, continue with the same form.
+                </div>
+              )}
 
               <label className="block">
                 <span className="mb-2 block text-sm font-semibold">Agent</span>
@@ -286,6 +325,12 @@ export default function Page() {
                 Owner Information
               </h2>
 
+              {form.sourceType === "Agency" && (
+                <div className="mb-6 rounded-2xl bg-amber-50 p-4 text-sm font-medium text-amber-800">
+                  Agency owner/contact route will be configured later. You can skip owner details for agency listings for now.
+                </div>
+              )}
+
               <Grid>
                 <Input label="Owner Name" value={form.ownerName} onChange={(v) => update("ownerName", v)} />
                 <Input label="Owner Phone" value={form.ownerPhone} onChange={(v) => update("ownerPhone", v)} />
@@ -306,10 +351,7 @@ export default function Page() {
                   </p>
                 </div>
 
-                <VoiceBox
-                  transcript={form.voiceTranscript}
-                  onTranscript={applyTranscript}
-                />
+                <VoiceBox transcript={form.voiceTranscript} onTranscript={applyTranscript} />
               </div>
 
               <Grid>
@@ -338,6 +380,8 @@ export default function Page() {
                 <Input label="Bedrooms" type="number" value={form.bedrooms} onChange={(v) => update("bedrooms", v)} />
 
                 <Input label="Bathrooms" type="number" value={form.bathrooms} onChange={(v) => update("bathrooms", v)} />
+
+                <Input label="Guest Toilets" type="number" value={form.guestToilets} onChange={(v) => update("guestToilets", v)} />
 
                 <Input label="Built sqm" type="number" value={form.surfaceSqm} onChange={(v) => update("surfaceSqm", v)} />
 
@@ -410,12 +454,17 @@ export default function Page() {
               </h2>
 
               <div className="space-y-4 rounded-3xl border border-slate-200 p-6">
+                <ReviewRow label="Source" value={form.sourceType} />
                 <ReviewRow label="Agent" value={form.agentName} />
                 <ReviewRow label="Owner" value={form.ownerName} />
                 <ReviewRow label="Property" value={form.propertyTitle} />
                 <ReviewRow label="Type" value={form.propertyType} />
                 <ReviewRow label="Operation" value={form.operation} />
                 <ReviewRow label="Address" value={`${form.address}, ${form.city}`} />
+                <ReviewRow label="Bedrooms" value={form.bedrooms} />
+                <ReviewRow label="Bathrooms" value={form.bathrooms} />
+                <ReviewRow label="Guest Toilets" value={form.guestToilets} />
+                <ReviewRow label="Built sqm" value={form.surfaceSqm} />
                 <ReviewRow label="Price" value={form.price ? `€ ${form.price}` : ""} />
                 <ReviewRow label="Documents" value={`${Object.keys(files).length} / ${requiredDocs.length}`} />
               </div>
@@ -575,47 +624,113 @@ function VoiceBox({ transcript, onTranscript }) {
 }
 
 function extractPropertyInfo(text) {
-  const t = text.toLowerCase();
+  const clean = text.replace(/[.,]/g, " ");
+  const t = clean.toLowerCase();
 
   const result = {};
 
   if (t.includes("villa")) result.propertyType = "Villa";
-  else if (t.includes("apartment") || t.includes("apartamento")) result.propertyType = "Apartment";
-  else if (t.includes("penthouse") || t.includes("ático")) result.propertyType = "Penthouse";
+  else if (t.includes("apartment") || t.includes("apartamento") || t.includes("flat")) result.propertyType = "Apartment";
+  else if (t.includes("penthouse") || t.includes("atico") || t.includes("ático")) result.propertyType = "Penthouse";
   else if (t.includes("townhouse") || t.includes("adosado")) result.propertyType = "Townhouse";
   else if (t.includes("plot") || t.includes("solar")) result.propertyType = "Plot";
   else if (t.includes("commercial") || t.includes("local")) result.propertyType = "Commercial";
 
-  if (t.includes("sale") || t.includes("venta")) result.operation = "Sale";
+  if (t.includes("sale") || t.includes("venta") || t.includes("selling")) result.operation = "Sale";
   if (t.includes("rental") || t.includes("rent") || t.includes("alquiler")) result.operation = "Rental";
+  if (t.includes("both") || t.includes("ambas")) result.operation = "Both";
 
-  const priceMatch = text.match(/(?:€|eur|euros?)\s?([\d.,]+)/i) || text.match(/([\d.,]+)\s?(?:€|eur|euros?)/i);
+  const priceMatch =
+    clean.match(/(?:€|eur|euros?)\s?([\d.,]+)/i) ||
+    clean.match(/([\d.,]+)\s?(?:€|eur|euros?)/i) ||
+    clean.match(/price\s?(?:is|of)?\s?([\d.,]+)/i);
   if (priceMatch) result.price = normalizeNumber(priceMatch[1]);
 
-  const bedsMatch = text.match(/(\d+)\s?(?:bedrooms?|beds?|dormitorios?|habitaciones?)/i);
-  if (bedsMatch) result.bedrooms = bedsMatch[1];
+  const bedrooms = extractNumberBeforeWords(t, ["bedroom", "bedrooms", "bed", "beds", "dormitorio", "dormitorios", "habitacion", "habitaciones"]);
+  if (bedrooms) result.bedrooms = bedrooms;
 
-  const bathsMatch = text.match(/(\d+)\s?(?:bathrooms?|baths?|baños?)/i);
-  if (bathsMatch) result.bathrooms = bathsMatch[1];
+  const bathrooms = extractNumberBeforeWords(t, ["bathroom", "bathrooms", "bath", "baths", "baño", "baños", "banos"]);
+  if (bathrooms) result.bathrooms = bathrooms;
 
-  const builtMatch = text.match(/(\d+)\s?(?:m2|m²|sqm|square meters?|metros construidos|built)/i);
+  const guestToilets = extractNumberBeforePhrase(t, ["guest toilet", "guest toilets", "toilet", "toilets", "aseo", "aseos"]);
+  if (guestToilets) result.guestToilets = guestToilets;
+
+  const builtMatch =
+    t.match(/(\d+)\s?(?:m2|m²|sqm|square meters?|metros cuadrados?)\s?(?:built|construidos?)/i) ||
+    t.match(/(?:built|construidos?)\s?(?:area)?\s?(\d+)\s?(?:m2|m²|sqm|square meters?|metros)?/i) ||
+    t.match(/(\d+)\s?(?:m2|m²|sqm|square meters?)\s?(?:property|built)?/i);
   if (builtMatch) result.surfaceSqm = builtMatch[1];
 
-  const plotMatch = text.match(/(\d+)\s?(?:m2|m²|sqm|square meters?|metros)\s?(?:plot|parcela)/i);
+  const plotMatch =
+    t.match(/(\d+)\s?(?:m2|m²|sqm|square meters?|metros)\s?(?:plot|parcela)/i) ||
+    t.match(/(?:plot|parcela)\s?(?:of)?\s?(\d+)/i);
   if (plotMatch) result.plotSqm = plotMatch[1];
 
-  const terraceMatch = text.match(/(\d+)\s?(?:m2|m²|sqm|square meters?|metros)\s?(?:terrace|terraza)/i);
+  const terraceMatch =
+    t.match(/(\d+)\s?(?:m2|m²|sqm|square meters?|metros)\s?(?:terrace|terraza)/i) ||
+    t.match(/(?:terrace|terraza)\s?(?:of)?\s?(\d+)/i);
   if (terraceMatch) result.terraceSqm = terraceMatch[1];
 
   const cities = ["Marbella", "Estepona", "Benahavis", "Benahavís", "Sotogrande", "Malaga", "Málaga", "Nueva Andalucia", "Nueva Andalucía"];
   const foundCity = cities.find((city) => t.includes(city.toLowerCase()));
   if (foundCity) result.city = foundCity;
 
-  const neighborhoods = ["Golden Mile", "Puente Romano", "Sierra Blanca", "Nueva Andalucía", "Puerto Banús", "La Zagaleta", "Elviria", "Los Monteros"];
+  const neighborhoods = ["Golden Mile", "Puente Romano", "Sierra Blanca", "Nueva Andalucía", "Nueva Andalucia", "Puerto Banús", "Puerto Banus", "La Zagaleta", "Elviria", "Los Monteros"];
   const foundNeighborhood = neighborhoods.find((n) => t.includes(n.toLowerCase()));
   if (foundNeighborhood) result.neighborhood = foundNeighborhood;
 
+  if (result.propertyType && result.city) {
+    result.propertyTitle = `${result.propertyType} in ${result.city}`;
+  } else if (result.propertyType && result.neighborhood) {
+    result.propertyTitle = `${result.propertyType} in ${result.neighborhood}`;
+  }
+
   return result;
+}
+
+function extractNumberBeforeWords(text, words) {
+  for (const word of words) {
+    const regex = new RegExp(`(?:^|\\s)(\\d+|one|two|three|four|five|six|seven|eight|nine|ten|uno|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez)\\s+${word}\\b`, "i");
+    const match = text.match(regex);
+    if (match) return wordToNumber(match[1]);
+  }
+  return "";
+}
+
+function extractNumberBeforePhrase(text, phrases) {
+  for (const phrase of phrases) {
+    const regex = new RegExp(`(?:^|\\s)(\\d+|one|two|three|four|five|six|seven|eight|nine|ten|uno|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez)\\s+${phrase}\\b`, "i");
+    const match = text.match(regex);
+    if (match) return wordToNumber(match[1]);
+  }
+  return "";
+}
+
+function wordToNumber(value) {
+  const map = {
+    one: "1",
+    two: "2",
+    three: "3",
+    four: "4",
+    five: "5",
+    six: "6",
+    seven: "7",
+    eight: "8",
+    nine: "9",
+    ten: "10",
+    uno: "1",
+    dos: "2",
+    tres: "3",
+    cuatro: "4",
+    cinco: "5",
+    seis: "6",
+    siete: "7",
+    ocho: "8",
+    nueve: "9",
+    diez: "10",
+  };
+
+  return map[value.toLowerCase()] || value;
 }
 
 function normalizeNumber(value) {
