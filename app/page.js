@@ -50,6 +50,10 @@ const requiredDocs = [
   ["energyCertificate", "Certificado energético / Energy certificate"],
 ];
 
+const optionalDocs = [
+  ["video", "Vídeo de la propiedad / Property video"],
+];
+
 const initialForm = {
   sourceType: "",
   agentName: "",
@@ -83,6 +87,7 @@ export default function Page() {
   const [files, setFiles] = useState({});
   const [voiceNotes, setVoiceNotes] = useState([]);
   const [message, setMessage] = useState("");
+  const [messageType, setMessageType] = useState("info");
   const [loading, setLoading] = useState(false);
   const [processingVoice, setProcessingVoice] = useState(false);
 
@@ -92,61 +97,84 @@ export default function Page() {
     setForm((f) => ({ ...f, [key]: value }));
   };
 
+  const showMessage = (text, type = "info") => {
+    setMessage(text);
+    setMessageType(type);
+  };
+
+  const addFiles = (key, selectedFiles) => {
+    setFiles((current) => ({
+      ...current,
+      [key]: [...(current[key] || []), ...selectedFiles],
+    }));
+  };
+
+  const removeFile = (key, indexToRemove) => {
+    setFiles((current) => ({
+      ...current,
+      [key]: (current[key] || []).filter((_, index) => index !== indexToRemove),
+    }));
+  };
+
   const processVoiceNotes = async () => {
     if (!voiceNotes.length) {
-      setMessage("Please record at least one voice note first.");
+      showMessage("Please record at least one voice note first.", "error");
       return;
     }
 
-    setProcessingVoice(true);
-    setMessage("");
+    try {
+      setProcessingVoice(true);
+      showMessage("", "info");
 
-    const data = new FormData();
+      const data = new FormData();
 
-    voiceNotes.forEach((note) => {
-      data.append("audio", note.file, note.file.name);
-    });
+      voiceNotes.forEach((note) => {
+        data.append("audio", note.file, note.file.name);
+      });
 
-    const res = await fetch("/api/transcribe", {
-      method: "POST",
-      body: data,
-    });
+      const res = await fetch("/api/transcribe", {
+        method: "POST",
+        body: data,
+      });
 
-    const json = await res.json();
-    setProcessingVoice(false);
+      const json = await res.json();
 
-    if (!res.ok) {
-      setMessage(json.error || "Voice processing failed.");
-      return;
+      if (!res.ok) {
+        throw new Error(json.error || "Voice processing failed.");
+      }
+
+      const extracted = json.fields || {};
+
+      setForm((f) => ({
+        ...f,
+        voiceTranscript: json.transcript || f.voiceTranscript,
+        propertyTitle: extracted.propertyTitle || f.propertyTitle,
+        propertyType: extracted.propertyType || f.propertyType,
+        operation: extracted.operation || f.operation,
+        city: extracted.city || f.city,
+        neighborhood: extracted.neighborhood || f.neighborhood,
+        address: extracted.address || f.address,
+        bedrooms: extracted.bedrooms || f.bedrooms,
+        bathrooms: extracted.bathrooms || f.bathrooms,
+        guestToilets: extracted.guestToilets || f.guestToilets,
+        surfaceSqm: extracted.surfaceSqm || f.surfaceSqm,
+        plotSqm: extracted.plotSqm || f.plotSqm,
+        terraceSqm: extracted.terraceSqm || f.terraceSqm,
+        price: extracted.price || f.price,
+        commission: extracted.commission || f.commission,
+        description: json.description || f.description,
+      }));
+
+      showMessage("Voice notes processed. Please review the auto-filled fields.", "success");
+    } catch (error) {
+      showMessage(error.message || "Voice processing failed.", "error");
+    } finally {
+      setProcessingVoice(false);
     }
-
-    const extracted = json.fields || {};
-
-    setForm((f) => ({
-      ...f,
-      voiceTranscript: json.transcript || f.voiceTranscript,
-      propertyTitle: extracted.propertyTitle || f.propertyTitle,
-      propertyType: extracted.propertyType || f.propertyType,
-      operation: extracted.operation || f.operation,
-      city: extracted.city || f.city,
-      neighborhood: extracted.neighborhood || f.neighborhood,
-      address: extracted.address || f.address,
-      bedrooms: extracted.bedrooms || f.bedrooms,
-      bathrooms: extracted.bathrooms || f.bathrooms,
-      guestToilets: extracted.guestToilets || f.guestToilets,
-      surfaceSqm: extracted.surfaceSqm || f.surfaceSqm,
-      plotSqm: extracted.plotSqm || f.plotSqm,
-      terraceSqm: extracted.terraceSqm || f.terraceSqm,
-      price: extracted.price || f.price,
-      commission: extracted.commission || f.commission,
-      description: json.description || f.description,
-    }));
-
-    setMessage("Voice notes processed. Please review the auto-filled fields.");
   };
 
   const validateAndGo = (targetStep) => {
-    setMessage("");
+    showMessage("", "info");
 
     if (targetStep < step) {
       setStep(targetStep);
@@ -154,24 +182,36 @@ export default function Page() {
     }
 
     if (step === 0 && (!form.sourceType || !form.agentEmail)) {
-      setMessage("Please select listing source and agent.");
+      showMessage("Please select listing source and agent.", "error");
       return;
     }
 
-    if (step === 1 && form.sourceType === "Owner Direct" && (!form.ownerName || !form.ownerPhone || !form.ownerEmail)) {
-      setMessage("Please complete owner information.");
+    if (
+      step === 1 &&
+      form.sourceType === "Owner Direct" &&
+      (!form.ownerName || !form.ownerPhone || !form.ownerEmail)
+    ) {
+      showMessage("Please complete owner information.", "error");
       return;
     }
 
-    if (step === 2 && (!form.propertyTitle || !form.propertyType || !form.address || !form.city || !form.price)) {
-      setMessage("Please complete all required property fields.");
+    if (
+      step === 2 &&
+      (!form.propertyTitle ||
+        !form.propertyType ||
+        !form.address ||
+        !form.city ||
+        !form.price)
+    ) {
+      showMessage("Please complete all required property fields.", "error");
       return;
     }
 
     if (step === 3) {
-      const missing = requiredDocs.filter(([key]) => !files[key]?.length);
+      const missing = requiredDocs.filter(([key]) => !(files[key] || []).length);
+
       if (missing.length) {
-        setMessage("All required documents must be uploaded.");
+        showMessage("All required documents must be uploaded.", "error");
         return;
       }
     }
@@ -182,135 +222,166 @@ export default function Page() {
   const next = () => validateAndGo(step + 1);
 
   const back = () => {
-    setMessage("");
+    showMessage("", "info");
     setStep((s) => Math.max(s - 1, 0));
   };
 
   const submit = async () => {
-    setLoading(true);
-    setMessage("");
+    try {
+      setLoading(true);
+      showMessage("", "info");
 
-    const body = new FormData();
+      const body = new FormData();
 
-    Object.entries(form).forEach(([key, value]) => {
-      body.append(key, value || "");
-    });
+      Object.entries(form).forEach(([key, value]) => {
+        body.append(key, value || "");
+      });
 
-    Object.entries(files).forEach(([key, fileList]) => {
-      fileList.forEach((file) => body.append(key, file));
-    });
+      Object.entries(files).forEach(([key, fileList]) => {
+        (fileList || []).forEach((file) => {
+          body.append(key, file, file.name);
+        });
+      });
 
-    voiceNotes.forEach((note) => {
-      body.append("voiceNotes", note.file, note.file.name);
-    });
+      voiceNotes.forEach((note) => {
+        body.append("voiceNotes", note.file, note.file.name);
+      });
 
-    const res = await fetch("/api/listings", {
-      method: "POST",
-      body,
-    });
+      const res = await fetch("/api/listings", {
+        method: "POST",
+        body,
+      });
 
-    setLoading(false);
+      const json = await res.json().catch(() => ({}));
 
-    if (!res.ok) {
-      setMessage("Submission failed. Please check the required fields and documents.");
-      return;
+      if (!res.ok) {
+        const missingFields = json.missingFields?.length
+          ? ` Missing fields: ${json.missingFields.join(", ")}.`
+          : "";
+
+        const missingDocs = json.missingDocs?.length
+          ? ` Missing documents: ${json.missingDocs.join(", ")}.`
+          : "";
+
+        throw new Error(
+          `${json.error || "Submission failed."}${missingFields}${missingDocs}`
+        );
+      }
+
+      showMessage(
+        json.message || "Property successfully submitted to the pipeline.",
+        "success"
+      );
+
+      alert("Listing submitted successfully.");
+    } catch (error) {
+      console.error("Submit error:", error);
+      showMessage(error.message || "Something went wrong submitting the listing.", "error");
+      alert(error.message || "Something went wrong submitting the listing.");
+    } finally {
+      setLoading(false);
     }
-
-    setMessage("Property successfully added to pipeline.");
   };
 
+  const totalDocumentCount = Object.values(files).reduce(
+    (count, fileList) => count + (fileList?.length || 0),
+    0
+  );
+
   return (
-    <main className="min-h-screen bg-[#f5f3ee] px-4 py-6 text-slate-900">
+    <main className="min-h-screen bg-[#f3f0ea] px-4 py-6 text-[#12263a]">
       <div className="mx-auto max-w-5xl">
-        <div className="rounded-[32px] bg-[#17395c] p-6 text-white shadow-2xl">
-          <div className="flex flex-col gap-5 md:flex-row md:items-center md:justify-between">
-            <div>
-              <h1 className="text-3xl font-bold">Alta de Propiedad</h1>
-              <p className="mt-2 text-white/70">Property Intake Form</p>
+        <div className="overflow-hidden rounded-[34px] bg-[#12385b] text-white shadow-2xl">
+          <div className="bg-gradient-to-r from-[#0d2f4f] via-[#164a73] to-[#2f7698] p-7 md:p-9">
+            <div className="flex flex-col gap-6 md:flex-row md:items-center md:justify-between">
+              <div>
+                <div className="mb-3 text-xs font-bold uppercase tracking-[0.28em] text-[#d8c59b]">
+                  Panorama Marbella · Since 1970
+                </div>
+                <h1 className="text-3xl font-semibold tracking-tight md:text-5xl">
+                  Alta de Propiedad
+                </h1>
+                <p className="mt-3 max-w-2xl text-sm leading-6 text-white/75 md:text-base">
+                  Professional property intake form for new listings, documents,
+                  media and AI-assisted descriptions.
+                </p>
+              </div>
+
+              <div className="rounded-2xl border border-white/20 bg-white/10 px-5 py-4 text-sm text-white/80 backdrop-blur">
+                Step <span className="font-bold text-white">{step + 1}</span> of{" "}
+                {steps.length}
+              </div>
             </div>
 
-            <div className="text-sm text-white/70">
-              Step {step + 1} of {steps.length}
+            <div className="mt-7 h-3 overflow-hidden rounded-full bg-white/20">
+              <div
+                className="h-full rounded-full bg-[#d8c59b] transition-all duration-300"
+                style={{ width: `${progress}%` }}
+              />
             </div>
-          </div>
 
-          <div className="mt-6 h-3 overflow-hidden rounded-full bg-white/20">
-            <div
-              className="h-full rounded-full bg-emerald-400 transition-all duration-300"
-              style={{ width: `${progress}%` }}
-            />
-          </div>
-
-          <div className="mt-6 grid grid-cols-5 gap-2">
-            {steps.map((s, i) => (
-              <button
-                key={s}
-                type="button"
-                onClick={() => {
-                  if (i <= step) setStep(i);
-                }}
-                className={`rounded-full px-2 py-2 text-center text-[11px] font-semibold transition-all md:text-xs ${
-                  i === step
-                    ? "bg-white text-[#17395c]"
-                    : i < step
-                    ? "bg-emerald-400 text-[#17395c]"
-                    : "bg-white/10 text-white"
-                }`}
-              >
-                {s}
-              </button>
-            ))}
+            <div className="mt-6 grid grid-cols-5 gap-2">
+              {steps.map((s, i) => (
+                <button
+                  key={s}
+                  type="button"
+                  onClick={() => {
+                    if (i <= step) setStep(i);
+                  }}
+                  className={`rounded-full px-2 py-2 text-center text-[11px] font-semibold transition-all md:text-xs ${
+                    i === step
+                      ? "bg-white text-[#12385b]"
+                      : i < step
+                      ? "bg-[#d8c59b] text-[#12385b]"
+                      : "bg-white/10 text-white"
+                  }`}
+                >
+                  {s}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
 
         {message && (
-          <div className="mt-5 rounded-2xl bg-white p-4 text-sm font-medium shadow">
+          <div
+            className={`mt-5 rounded-2xl p-4 text-sm font-medium shadow ${
+              messageType === "success"
+                ? "bg-green-50 text-green-800"
+                : messageType === "error"
+                ? "bg-red-50 text-red-800"
+                : "bg-white text-[#12263a]"
+            }`}
+          >
             {message}
           </div>
         )}
 
-        <div className="mt-6 rounded-[32px] bg-white p-6 shadow-xl md:p-10">
+        <div className="mt-6 rounded-[32px] border border-[#d9e4ea] bg-white p-6 shadow-xl md:p-10">
           {step === 0 && (
             <section>
-              <h2 className="mb-6 text-2xl font-bold text-[#17395c]">
-                Listing Source & Agent
-              </h2>
+              <SectionTitle title="Listing Source & Agent" />
 
               <div className="mb-6 grid gap-4 md:grid-cols-2">
-                <button
-                  type="button"
+                <ChoiceCard
+                  active={form.sourceType === "Owner Direct"}
+                  title="Direct Owner"
+                  text="The property comes directly from the owner."
                   onClick={() => update("sourceType", "Owner Direct")}
-                  className={`rounded-3xl border p-6 text-left transition ${
-                    form.sourceType === "Owner Direct"
-                      ? "border-emerald-500 bg-emerald-50"
-                      : "border-slate-200 bg-[#faf9f5]"
-                  }`}
-                >
-                  <div className="text-lg font-bold text-[#17395c]">Direct Owner</div>
-                  <div className="mt-2 text-sm text-slate-500">
-                    The property comes directly from the owner.
-                  </div>
-                </button>
+                />
 
-                <button
-                  type="button"
+                <ChoiceCard
+                  active={form.sourceType === "Agency"}
+                  title="Agency"
+                  text="The property comes from another agency."
                   onClick={() => update("sourceType", "Agency")}
-                  className={`rounded-3xl border p-6 text-left transition ${
-                    form.sourceType === "Agency"
-                      ? "border-emerald-500 bg-emerald-50"
-                      : "border-slate-200 bg-[#faf9f5]"
-                  }`}
-                >
-                  <div className="text-lg font-bold text-[#17395c]">Agency</div>
-                  <div className="mt-2 text-sm text-slate-500">
-                    The property comes from another agency.
-                  </div>
-                </button>
+                />
               </div>
 
               {form.sourceType === "Agency" && (
-                <div className="mb-6 rounded-2xl bg-amber-50 p-4 text-sm font-medium text-amber-800">
-                  Agency route will be configured later. For now, continue with the same form.
+                <div className="mb-6 rounded-2xl bg-[#eef6fa] p-4 text-sm font-medium text-[#12385b]">
+                  Agency route will be configured later. For now, continue with
+                  the same form.
                 </div>
               )}
 
@@ -328,7 +399,7 @@ export default function Page() {
                       update("agentPhone", selected.phone);
                     }
                   }}
-                  className="w-full rounded-2xl border border-slate-200 bg-[#faf9f5] px-5 py-4 text-base outline-none focus:border-[#17395c]"
+                  className="w-full rounded-2xl border border-[#d9e4ea] bg-[#fbfaf7] px-5 py-4 text-base outline-none focus:border-[#2f7698]"
                 >
                   <option value="">Select agent...</option>
                   {agents.map((agent) => (
@@ -340,7 +411,7 @@ export default function Page() {
               </label>
 
               {form.agentEmail && (
-                <div className="mt-6 grid gap-4 rounded-3xl bg-emerald-50 p-6 md:grid-cols-3">
+                <div className="mt-6 grid gap-4 rounded-3xl bg-[#eef6fa] p-6 md:grid-cols-3">
                   <InfoCard label="Name" value={form.agentName} />
                   <InfoCard label="Email" value={form.agentEmail} />
                   <InfoCard label="Mobile" value={form.agentPhone} />
@@ -351,13 +422,12 @@ export default function Page() {
 
           {step === 1 && (
             <section>
-              <h2 className="mb-6 text-2xl font-bold text-[#17395c]">
-                Owner Information
-              </h2>
+              <SectionTitle title="Owner Information" />
 
               {form.sourceType === "Agency" && (
-                <div className="mb-6 rounded-2xl bg-amber-50 p-4 text-sm font-medium text-amber-800">
-                  Agency owner/contact route will be configured later. You can skip owner details for agency listings for now.
+                <div className="mb-6 rounded-2xl bg-[#fff8e7] p-4 text-sm font-medium text-[#7a5a18]">
+                  Agency owner/contact route will be configured later. You can
+                  skip owner details for agency listings for now.
                 </div>
               )}
 
@@ -373,7 +443,7 @@ export default function Page() {
             <section>
               <div className="mb-6 flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
                 <div>
-                  <h2 className="text-2xl font-bold text-[#17395c]">Property Details</h2>
+                  <SectionTitle title="Property Details" compact />
                   <p className="mt-1 text-sm text-slate-500">
                     Fill manually or add one or more voice notes to auto-fill fields.
                   </p>
@@ -424,17 +494,19 @@ export default function Page() {
                 <textarea
                   value={form.description}
                   onChange={(e) => update("description", e.target.value)}
-                  className="min-h-[160px] w-full rounded-2xl border border-slate-200 bg-[#faf9f5] px-5 py-4 outline-none transition focus:border-[#17395c]"
+                  className="min-h-[160px] w-full rounded-2xl border border-[#d9e4ea] bg-[#fbfaf7] px-5 py-4 outline-none transition focus:border-[#2f7698]"
                   placeholder="After processing voice notes, a cleaned property description will appear here..."
                 />
               </label>
 
               {form.voiceTranscript && (
-                <details className="mt-4 rounded-2xl bg-slate-50 p-4 text-sm">
-                  <summary className="cursor-pointer font-semibold text-[#17395c]">
+                <details className="mt-4 rounded-2xl bg-[#eef6fa] p-4 text-sm">
+                  <summary className="cursor-pointer font-semibold text-[#12385b]">
                     View raw combined transcript
                   </summary>
-                  <p className="mt-3 whitespace-pre-wrap text-slate-600">{form.voiceTranscript}</p>
+                  <p className="mt-3 whitespace-pre-wrap text-slate-600">
+                    {form.voiceTranscript}
+                  </p>
                 </details>
               )}
             </section>
@@ -442,38 +514,24 @@ export default function Page() {
 
           {step === 3 && (
             <section>
-              <h2 className="mb-6 text-2xl font-bold text-[#17395c]">
-                Required Documents
-              </h2>
+              <SectionTitle title="Required Documents & Media" />
 
               <div className="mb-6 rounded-2xl bg-red-50 p-4 text-sm text-red-700">
-                All documents are mandatory. Missing documents = property will NOT enter pipeline.
+                All required documents are mandatory. Photos and video support
+                multiple files.
               </div>
 
               <div className="space-y-4">
-                {requiredDocs.map(([key, label]) => (
-                  <label
+                {[...requiredDocs, ...optionalDocs].map(([key, label]) => (
+                  <FileUploadRow
                     key={key}
-                    className="flex flex-col gap-4 rounded-2xl border border-slate-200 bg-[#faf9f5] p-5 md:flex-row md:items-center md:justify-between"
-                  >
-                    <div>
-                      <div className="font-semibold">{label}</div>
-                      <div className="mt-1 text-xs text-slate-500">
-                        {files[key]?.length ? `${files[key].length} file(s) selected` : "PDF, image or document"}
-                      </div>
-                    </div>
-
-                    <input
-                      type="file"
-                      multiple={key === "photos"}
-                      onChange={(e) =>
-                        setFiles((f) => ({
-                          ...f,
-                          [key]: Array.from(e.target.files || []),
-                        }))
-                      }
-                    />
-                  </label>
+                    fileKey={key}
+                    label={label}
+                    files={files[key] || []}
+                    required={requiredDocs.some(([requiredKey]) => requiredKey === key)}
+                    onAddFiles={addFiles}
+                    onRemoveFile={removeFile}
+                  />
                 ))}
               </div>
             </section>
@@ -481,11 +539,9 @@ export default function Page() {
 
           {step === 4 && (
             <section>
-              <h2 className="mb-6 text-2xl font-bold text-[#17395c]">
-                Review
-              </h2>
+              <SectionTitle title="Review" />
 
-              <div className="space-y-4 rounded-3xl border border-slate-200 p-6">
+              <div className="space-y-4 rounded-3xl border border-[#d9e4ea] p-6">
                 <ReviewRow label="Source" value={form.sourceType} />
                 <ReviewRow label="Agent" value={form.agentName} />
                 <ReviewRow label="Owner" value={form.ownerName} />
@@ -499,14 +555,14 @@ export default function Page() {
                 <ReviewRow label="Built sqm" value={form.surfaceSqm} />
                 <ReviewRow label="Price" value={form.price ? `€ ${form.price}` : ""} />
                 <ReviewRow label="Voice Notes" value={`${voiceNotes.length}`} />
-                <ReviewRow label="Documents" value={`${Object.keys(files).length} / ${requiredDocs.length}`} />
+                <ReviewRow label="Uploaded Files" value={`${totalDocumentCount}`} />
               </div>
 
               <textarea
                 placeholder="Additional notes..."
                 value={form.notes}
                 onChange={(e) => update("notes", e.target.value)}
-                className="mt-6 min-h-[120px] w-full rounded-2xl border border-slate-200 bg-[#faf9f5] p-5 outline-none"
+                className="mt-6 min-h-[120px] w-full rounded-2xl border border-[#d9e4ea] bg-[#fbfaf7] p-5 outline-none focus:border-[#2f7698]"
               />
             </section>
           )}
@@ -514,8 +570,9 @@ export default function Page() {
           <div className="mt-10 flex flex-col gap-3 md:flex-row">
             {step > 0 && (
               <button
+                type="button"
                 onClick={back}
-                className="rounded-2xl border border-slate-300 px-6 py-4 font-semibold"
+                className="rounded-2xl border border-[#d9e4ea] px-6 py-4 font-semibold text-[#12385b]"
               >
                 Back
               </button>
@@ -523,16 +580,18 @@ export default function Page() {
 
             {step < steps.length - 1 ? (
               <button
+                type="button"
                 onClick={next}
-                className="flex-1 rounded-2xl bg-[#17395c] px-6 py-4 font-semibold text-white transition hover:opacity-90"
+                className="flex-1 rounded-2xl bg-[#12385b] px-6 py-4 font-semibold text-white transition hover:bg-[#164a73]"
               >
                 Continue
               </button>
             ) : (
               <button
+                type="button"
                 onClick={submit}
                 disabled={loading}
-                className="flex-1 rounded-2xl bg-emerald-600 px-6 py-4 font-semibold text-white transition hover:opacity-90 disabled:opacity-50"
+                className="flex-1 rounded-2xl bg-[#12385b] px-6 py-4 font-semibold text-white transition hover:bg-[#164a73] disabled:opacity-50"
               >
                 {loading ? "Submitting..." : "Submit to Pipeline"}
               </button>
@@ -612,8 +671,8 @@ function VoiceNotesBox({ voiceNotes, setVoiceNotes, onProcess, processing }) {
   };
 
   return (
-    <div className="w-full rounded-3xl bg-[#f5f3ee] p-4 md:max-w-sm">
-      <div className="font-semibold text-[#17395c]">Voice notes</div>
+    <div className="w-full rounded-3xl bg-[#eef6fa] p-4 md:max-w-sm">
+      <div className="font-semibold text-[#12385b]">Voice notes</div>
 
       <p className="mt-1 text-xs text-slate-500">
         Record one or more audio notes. Stop manually when finished.
@@ -624,7 +683,7 @@ function VoiceNotesBox({ voiceNotes, setVoiceNotes, onProcess, processing }) {
           <button
             type="button"
             onClick={startRecording}
-            className="flex-1 rounded-2xl bg-[#17395c] px-4 py-3 text-sm font-semibold text-white"
+            className="flex-1 rounded-2xl bg-[#12385b] px-4 py-3 text-sm font-semibold text-white"
           >
             🎙 Start Recording
           </button>
@@ -667,7 +726,7 @@ function VoiceNotesBox({ voiceNotes, setVoiceNotes, onProcess, processing }) {
             type="button"
             onClick={onProcess}
             disabled={processing}
-            className="w-full rounded-2xl bg-emerald-600 px-4 py-3 text-sm font-semibold text-white disabled:opacity-50"
+            className="w-full rounded-2xl bg-[#d8c59b] px-4 py-3 text-sm font-semibold text-[#12385b] disabled:opacity-50"
           >
             {processing ? "Processing..." : "Transcribe & Auto-fill"}
           </button>
@@ -677,8 +736,83 @@ function VoiceNotesBox({ voiceNotes, setVoiceNotes, onProcess, processing }) {
   );
 }
 
+function FileUploadRow({ fileKey, label, files, required, onAddFiles, onRemoveFile }) {
+  return (
+    <div className="rounded-2xl border border-[#d9e4ea] bg-[#fbfaf7] p-5">
+      <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+        <div>
+          <div className="font-semibold text-[#12263a]">
+            {label} {required ? <span className="text-red-600">*</span> : null}
+          </div>
+          <div className="mt-1 text-xs text-slate-500">
+            {files.length ? `${files.length} file(s) selected` : "PDF, image, video or document"}
+          </div>
+        </div>
+
+        <input
+          type="file"
+          multiple
+          onChange={(e) => {
+            const selected = Array.from(e.target.files || []);
+            onAddFiles(fileKey, selected);
+            e.target.value = "";
+          }}
+        />
+      </div>
+
+      {files.length > 0 && (
+        <div className="mt-4 space-y-2">
+          {files.map((file, index) => (
+            <div
+              key={`${file.name}-${index}`}
+              className="flex items-center justify-between gap-3 rounded-xl bg-white px-4 py-3 text-sm shadow-sm"
+            >
+              <span className="truncate">{file.name}</span>
+              <button
+                type="button"
+                onClick={() => onRemoveFile(fileKey, index)}
+                className="shrink-0 font-semibold text-red-600"
+              >
+                Remove
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function Grid({ children }) {
   return <div className="grid gap-5 md:grid-cols-2">{children}</div>;
+}
+
+function SectionTitle({ title, compact = false }) {
+  return (
+    <div className={compact ? "" : "mb-6"}>
+      <div className="mb-2 text-xs font-bold uppercase tracking-[0.22em] text-[#b89a63]">
+        Panorama Intake
+      </div>
+      <h2 className="text-2xl font-semibold text-[#12385b]">{title}</h2>
+    </div>
+  );
+}
+
+function ChoiceCard({ active, title, text, onClick }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`rounded-3xl border p-6 text-left transition ${
+        active
+          ? "border-[#2f7698] bg-[#eef6fa] shadow-md"
+          : "border-[#d9e4ea] bg-[#fbfaf7]"
+      }`}
+    >
+      <div className="text-lg font-semibold text-[#12385b]">{title}</div>
+      <div className="mt-2 text-sm text-slate-500">{text}</div>
+    </button>
+  );
 }
 
 function Input({ label, value, onChange, type = "text" }) {
@@ -692,7 +826,7 @@ function Input({ label, value, onChange, type = "text" }) {
         type={type}
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="w-full rounded-2xl border border-slate-200 bg-[#faf9f5] px-5 py-4 outline-none transition focus:border-[#17395c]"
+        className="w-full rounded-2xl border border-[#d9e4ea] bg-[#fbfaf7] px-5 py-4 outline-none transition focus:border-[#2f7698]"
       />
     </label>
   );
@@ -708,7 +842,7 @@ function Select({ label, value, onChange, options }) {
       <select
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="w-full rounded-2xl border border-slate-200 bg-[#faf9f5] px-5 py-4 outline-none transition focus:border-[#17395c]"
+        className="w-full rounded-2xl border border-[#d9e4ea] bg-[#fbfaf7] px-5 py-4 outline-none transition focus:border-[#2f7698]"
       >
         <option value="">Select...</option>
 
@@ -738,7 +872,9 @@ function ReviewRow({ label, value }) {
   return (
     <div className="flex items-center justify-between gap-4 border-b border-slate-100 pb-3 last:border-0">
       <span className="font-medium text-slate-500">{label}</span>
-      <span className="text-right font-semibold text-slate-900">{value || "—"}</span>
+      <span className="text-right font-semibold text-slate-900">
+        {value || "—"}
+      </span>
     </div>
   );
 }
