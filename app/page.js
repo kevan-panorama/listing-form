@@ -81,8 +81,10 @@ export default function Page() {
   const [step, setStep] = useState(0);
   const [form, setForm] = useState(initialForm);
   const [files, setFiles] = useState({});
+  const [voiceNotes, setVoiceNotes] = useState([]);
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(false);
+  const [processingVoice, setProcessingVoice] = useState(false);
 
   const progress = ((step + 1) / steps.length) * 100;
 
@@ -90,12 +92,39 @@ export default function Page() {
     setForm((f) => ({ ...f, [key]: value }));
   };
 
-  const applyTranscript = (text) => {
-    const extracted = extractPropertyInfo(text);
+  const processVoiceNotes = async () => {
+    if (!voiceNotes.length) {
+      setMessage("Please record at least one voice note first.");
+      return;
+    }
+
+    setProcessingVoice(true);
+    setMessage("");
+
+    const data = new FormData();
+
+    voiceNotes.forEach((note) => {
+      data.append("audio", note.file, note.file.name);
+    });
+
+    const res = await fetch("/api/transcribe", {
+      method: "POST",
+      body: data,
+    });
+
+    const json = await res.json();
+    setProcessingVoice(false);
+
+    if (!res.ok) {
+      setMessage(json.error || "Voice processing failed.");
+      return;
+    }
+
+    const extracted = json.fields || {};
 
     setForm((f) => ({
       ...f,
-      voiceTranscript: text,
+      voiceTranscript: json.transcript || f.voiceTranscript,
       propertyTitle: extracted.propertyTitle || f.propertyTitle,
       propertyType: extracted.propertyType || f.propertyType,
       operation: extracted.operation || f.operation,
@@ -109,10 +138,11 @@ export default function Page() {
       plotSqm: extracted.plotSqm || f.plotSqm,
       terraceSqm: extracted.terraceSqm || f.terraceSqm,
       price: extracted.price || f.price,
-      description: text || f.description,
+      commission: extracted.commission || f.commission,
+      description: json.description || f.description,
     }));
 
-    setMessage("Voice note processed. Please review the auto-filled fields.");
+    setMessage("Voice notes processed. Please review the auto-filled fields.");
   };
 
   const validateAndGo = (targetStep) => {
@@ -168,6 +198,10 @@ export default function Page() {
 
     Object.entries(files).forEach(([key, fileList]) => {
       fileList.forEach((file) => body.append(key, file));
+    });
+
+    voiceNotes.forEach((note) => {
+      body.append("voiceNotes", note.file, note.file.name);
     });
 
     const res = await fetch("/api/listings", {
@@ -252,9 +286,7 @@ export default function Page() {
                       : "border-slate-200 bg-[#faf9f5]"
                   }`}
                 >
-                  <div className="text-lg font-bold text-[#17395c]">
-                    Direct Owner
-                  </div>
+                  <div className="text-lg font-bold text-[#17395c]">Direct Owner</div>
                   <div className="mt-2 text-sm text-slate-500">
                     The property comes directly from the owner.
                   </div>
@@ -269,9 +301,7 @@ export default function Page() {
                       : "border-slate-200 bg-[#faf9f5]"
                   }`}
                 >
-                  <div className="text-lg font-bold text-[#17395c]">
-                    Agency
-                  </div>
+                  <div className="text-lg font-bold text-[#17395c]">Agency</div>
                   <div className="mt-2 text-sm text-slate-500">
                     The property comes from another agency.
                   </div>
@@ -343,15 +373,18 @@ export default function Page() {
             <section>
               <div className="mb-6 flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
                 <div>
-                  <h2 className="text-2xl font-bold text-[#17395c]">
-                    Property Details
-                  </h2>
+                  <h2 className="text-2xl font-bold text-[#17395c]">Property Details</h2>
                   <p className="mt-1 text-sm text-slate-500">
-                    Fill manually or use voice note to auto-fill fields.
+                    Fill manually or add one or more voice notes to auto-fill fields.
                   </p>
                 </div>
 
-                <VoiceBox transcript={form.voiceTranscript} onTranscript={applyTranscript} />
+                <VoiceNotesBox
+                  voiceNotes={voiceNotes}
+                  setVoiceNotes={setVoiceNotes}
+                  onProcess={processVoiceNotes}
+                  processing={processingVoice}
+                />
               </div>
 
               <Grid>
@@ -372,39 +405,38 @@ export default function Page() {
                 />
 
                 <Input label="Address" value={form.address} onChange={(v) => update("address", v)} />
-
                 <Input label="City" value={form.city} onChange={(v) => update("city", v)} />
-
                 <Input label="Neighborhood" value={form.neighborhood} onChange={(v) => update("neighborhood", v)} />
-
                 <Input label="Bedrooms" type="number" value={form.bedrooms} onChange={(v) => update("bedrooms", v)} />
-
                 <Input label="Bathrooms" type="number" value={form.bathrooms} onChange={(v) => update("bathrooms", v)} />
-
                 <Input label="Guest Toilets" type="number" value={form.guestToilets} onChange={(v) => update("guestToilets", v)} />
-
                 <Input label="Built sqm" type="number" value={form.surfaceSqm} onChange={(v) => update("surfaceSqm", v)} />
-
                 <Input label="Plot sqm" type="number" value={form.plotSqm} onChange={(v) => update("plotSqm", v)} />
-
                 <Input label="Terrace sqm" type="number" value={form.terraceSqm} onChange={(v) => update("terraceSqm", v)} />
-
                 <Input label="Price €" type="number" value={form.price} onChange={(v) => update("price", v)} />
-
                 <Input label="Commission" value={form.commission} onChange={(v) => update("commission", v)} />
               </Grid>
 
               <label className="mt-5 block">
                 <span className="mb-2 block text-sm font-semibold text-slate-700">
-                  Description / Voice transcript
+                  Clean Property Description
                 </span>
                 <textarea
                   value={form.description}
                   onChange={(e) => update("description", e.target.value)}
-                  className="min-h-[140px] w-full rounded-2xl border border-slate-200 bg-[#faf9f5] px-5 py-4 outline-none transition focus:border-[#17395c]"
-                  placeholder="Speak or write the property description here..."
+                  className="min-h-[160px] w-full rounded-2xl border border-slate-200 bg-[#faf9f5] px-5 py-4 outline-none transition focus:border-[#17395c]"
+                  placeholder="After processing voice notes, a cleaned property description will appear here..."
                 />
               </label>
+
+              {form.voiceTranscript && (
+                <details className="mt-4 rounded-2xl bg-slate-50 p-4 text-sm">
+                  <summary className="cursor-pointer font-semibold text-[#17395c]">
+                    View raw combined transcript
+                  </summary>
+                  <p className="mt-3 whitespace-pre-wrap text-slate-600">{form.voiceTranscript}</p>
+                </details>
+              )}
             </section>
           )}
 
@@ -466,6 +498,7 @@ export default function Page() {
                 <ReviewRow label="Guest Toilets" value={form.guestToilets} />
                 <ReviewRow label="Built sqm" value={form.surfaceSqm} />
                 <ReviewRow label="Price" value={form.price ? `€ ${form.price}` : ""} />
+                <ReviewRow label="Voice Notes" value={`${voiceNotes.length}`} />
                 <ReviewRow label="Documents" value={`${Object.keys(files).length} / ${requiredDocs.length}`} />
               </div>
 
@@ -511,230 +544,137 @@ export default function Page() {
   );
 }
 
-function VoiceBox({ transcript, onTranscript }) {
-  const recognitionRef = useRef(null);
-  const [listening, setListening] = useState(false);
-  const [localTranscript, setLocalTranscript] = useState(transcript || "");
-  const [fallback, setFallback] = useState(false);
+function VoiceNotesBox({ voiceNotes, setVoiceNotes, onProcess, processing }) {
+  const mediaRecorderRef = useRef(null);
+  const chunksRef = useRef([]);
+  const streamRef = useRef(null);
+  const [recording, setRecording] = useState(false);
+  const [error, setError] = useState("");
 
-  const startVoice = () => {
-    const SpeechRecognition =
-      typeof window !== "undefined" &&
-      (window.SpeechRecognition || window.webkitSpeechRecognition);
+  const startRecording = async () => {
+    setError("");
 
-    if (!SpeechRecognition) {
-      setFallback(true);
-      return;
-    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      streamRef.current = stream;
 
-    const recognition = new SpeechRecognition();
-    recognitionRef.current = recognition;
+      const mimeType = MediaRecorder.isTypeSupported("audio/webm")
+        ? "audio/webm"
+        : MediaRecorder.isTypeSupported("audio/mp4")
+        ? "audio/mp4"
+        : "";
 
-    recognition.lang = "en-GB";
-    recognition.interimResults = true;
-    recognition.continuous = true;
+      const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
+      mediaRecorderRef.current = recorder;
+      chunksRef.current = [];
 
-    let finalText = localTranscript ? localTranscript + " " : "";
-
-    recognition.onstart = () => setListening(true);
-
-    recognition.onresult = (event) => {
-      let interimText = "";
-
-      for (let i = event.resultIndex; i < event.results.length; i++) {
-        const text = event.results[i][0].transcript;
-
-        if (event.results[i].isFinal) {
-          finalText += text + " ";
-        } else {
-          interimText += text;
+      recorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          chunksRef.current.push(event.data);
         }
-      }
+      };
 
-      setLocalTranscript((finalText + interimText).trim());
-    };
+      recorder.onstop = () => {
+        const type = recorder.mimeType || "audio/webm";
+        const extension = type.includes("mp4") ? "m4a" : "webm";
+        const blob = new Blob(chunksRef.current, { type });
+        const file = new File([blob], `voice-note-${Date.now()}.${extension}`, { type });
+        const url = URL.createObjectURL(blob);
 
-    recognition.onerror = () => {
-      setListening(false);
-      setFallback(true);
-    };
+        setVoiceNotes((notes) => [
+          ...notes,
+          {
+            id: `${Date.now()}-${Math.random()}`,
+            file,
+            url,
+            name: `Voice Note ${notes.length + 1}`,
+            size: blob.size,
+          },
+        ]);
 
-    recognition.onend = () => {
-      setListening(false);
-    };
+        streamRef.current?.getTracks().forEach((track) => track.stop());
+      };
 
-    recognition.start();
+      recorder.start();
+      setRecording(true);
+    } catch (err) {
+      setError("Microphone access failed. Please allow microphone permissions and try again.");
+    }
   };
 
-  const stopVoice = () => {
-    if (recognitionRef.current) {
-      recognitionRef.current.stop();
-    }
+  const stopRecording = () => {
+    mediaRecorderRef.current?.stop();
+    setRecording(false);
+  };
 
-    setListening(false);
-    onTranscript(localTranscript);
+  const deleteNote = (id) => {
+    setVoiceNotes((notes) => notes.filter((note) => note.id !== id));
   };
 
   return (
     <div className="w-full rounded-3xl bg-[#f5f3ee] p-4 md:max-w-sm">
-      <div className="font-semibold text-[#17395c]">Voice note</div>
+      <div className="font-semibold text-[#17395c]">Voice notes</div>
 
       <p className="mt-1 text-xs text-slate-500">
-        Works on Chrome/Android. On iPhone, use the manual box or keyboard microphone.
+        Record one or more audio notes. Stop manually when finished.
       </p>
 
       <div className="mt-4 flex gap-2">
-        {!listening ? (
+        {!recording ? (
           <button
             type="button"
-            onClick={startVoice}
+            onClick={startRecording}
             className="flex-1 rounded-2xl bg-[#17395c] px-4 py-3 text-sm font-semibold text-white"
           >
-            🎙 Start
+            🎙 Start Recording
           </button>
         ) : (
           <button
             type="button"
-            onClick={stopVoice}
+            onClick={stopRecording}
             className="flex-1 rounded-2xl bg-red-600 px-4 py-3 text-sm font-semibold text-white"
           >
-            Stop & Fill
+            Stop
           </button>
         )}
-
-        <button
-          type="button"
-          onClick={() => onTranscript(localTranscript)}
-          className="rounded-2xl border border-slate-300 px-4 py-3 text-sm font-semibold"
-        >
-          Fill
-        </button>
       </div>
 
-      {(fallback || localTranscript) && (
-        <textarea
-          value={localTranscript}
-          onChange={(e) => setLocalTranscript(e.target.value)}
-          className="mt-4 min-h-[120px] w-full rounded-2xl border border-slate-200 bg-white p-3 text-sm outline-none"
-          placeholder="Speak using your phone keyboard microphone or paste the transcript here..."
-        />
+      {error && <div className="mt-3 text-xs font-medium text-red-600">{error}</div>}
+
+      {voiceNotes.length > 0 && (
+        <div className="mt-4 space-y-3">
+          {voiceNotes.map((note, index) => (
+            <div key={note.id} className="rounded-2xl bg-white p-3 shadow-sm">
+              <div className="mb-2 flex items-center justify-between gap-2">
+                <div className="text-sm font-semibold text-slate-800">
+                  Voice Note {index + 1}
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => deleteNote(note.id)}
+                  className="text-xs font-semibold text-red-600"
+                >
+                  Delete
+                </button>
+              </div>
+
+              <audio controls src={note.url} className="w-full" />
+            </div>
+          ))}
+
+          <button
+            type="button"
+            onClick={onProcess}
+            disabled={processing}
+            className="w-full rounded-2xl bg-emerald-600 px-4 py-3 text-sm font-semibold text-white disabled:opacity-50"
+          >
+            {processing ? "Processing..." : "Transcribe & Auto-fill"}
+          </button>
+        </div>
       )}
     </div>
   );
-}
-
-function extractPropertyInfo(text) {
-  const clean = text.replace(/[.,]/g, " ");
-  const t = clean.toLowerCase();
-
-  const result = {};
-
-  if (t.includes("villa")) result.propertyType = "Villa";
-  else if (t.includes("apartment") || t.includes("apartamento") || t.includes("flat")) result.propertyType = "Apartment";
-  else if (t.includes("penthouse") || t.includes("atico") || t.includes("ático")) result.propertyType = "Penthouse";
-  else if (t.includes("townhouse") || t.includes("adosado")) result.propertyType = "Townhouse";
-  else if (t.includes("plot") || t.includes("solar")) result.propertyType = "Plot";
-  else if (t.includes("commercial") || t.includes("local")) result.propertyType = "Commercial";
-
-  if (t.includes("sale") || t.includes("venta") || t.includes("selling")) result.operation = "Sale";
-  if (t.includes("rental") || t.includes("rent") || t.includes("alquiler")) result.operation = "Rental";
-  if (t.includes("both") || t.includes("ambas")) result.operation = "Both";
-
-  const priceMatch =
-    clean.match(/(?:€|eur|euros?)\s?([\d.,]+)/i) ||
-    clean.match(/([\d.,]+)\s?(?:€|eur|euros?)/i) ||
-    clean.match(/price\s?(?:is|of)?\s?([\d.,]+)/i);
-  if (priceMatch) result.price = normalizeNumber(priceMatch[1]);
-
-  const bedrooms = extractNumberBeforeWords(t, ["bedroom", "bedrooms", "bed", "beds", "dormitorio", "dormitorios", "habitacion", "habitaciones"]);
-  if (bedrooms) result.bedrooms = bedrooms;
-
-  const bathrooms = extractNumberBeforeWords(t, ["bathroom", "bathrooms", "bath", "baths", "baño", "baños", "banos"]);
-  if (bathrooms) result.bathrooms = bathrooms;
-
-  const guestToilets = extractNumberBeforePhrase(t, ["guest toilet", "guest toilets", "toilet", "toilets", "aseo", "aseos"]);
-  if (guestToilets) result.guestToilets = guestToilets;
-
-  const builtMatch =
-    t.match(/(\d+)\s?(?:m2|m²|sqm|square meters?|metros cuadrados?)\s?(?:built|construidos?)/i) ||
-    t.match(/(?:built|construidos?)\s?(?:area)?\s?(\d+)\s?(?:m2|m²|sqm|square meters?|metros)?/i) ||
-    t.match(/(\d+)\s?(?:m2|m²|sqm|square meters?)\s?(?:property|built)?/i);
-  if (builtMatch) result.surfaceSqm = builtMatch[1];
-
-  const plotMatch =
-    t.match(/(\d+)\s?(?:m2|m²|sqm|square meters?|metros)\s?(?:plot|parcela)/i) ||
-    t.match(/(?:plot|parcela)\s?(?:of)?\s?(\d+)/i);
-  if (plotMatch) result.plotSqm = plotMatch[1];
-
-  const terraceMatch =
-    t.match(/(\d+)\s?(?:m2|m²|sqm|square meters?|metros)\s?(?:terrace|terraza)/i) ||
-    t.match(/(?:terrace|terraza)\s?(?:of)?\s?(\d+)/i);
-  if (terraceMatch) result.terraceSqm = terraceMatch[1];
-
-  const cities = ["Marbella", "Estepona", "Benahavis", "Benahavís", "Sotogrande", "Malaga", "Málaga", "Nueva Andalucia", "Nueva Andalucía"];
-  const foundCity = cities.find((city) => t.includes(city.toLowerCase()));
-  if (foundCity) result.city = foundCity;
-
-  const neighborhoods = ["Golden Mile", "Puente Romano", "Sierra Blanca", "Nueva Andalucía", "Nueva Andalucia", "Puerto Banús", "Puerto Banus", "La Zagaleta", "Elviria", "Los Monteros"];
-  const foundNeighborhood = neighborhoods.find((n) => t.includes(n.toLowerCase()));
-  if (foundNeighborhood) result.neighborhood = foundNeighborhood;
-
-  if (result.propertyType && result.city) {
-    result.propertyTitle = `${result.propertyType} in ${result.city}`;
-  } else if (result.propertyType && result.neighborhood) {
-    result.propertyTitle = `${result.propertyType} in ${result.neighborhood}`;
-  }
-
-  return result;
-}
-
-function extractNumberBeforeWords(text, words) {
-  for (const word of words) {
-    const regex = new RegExp(`(?:^|\\s)(\\d+|one|two|three|four|five|six|seven|eight|nine|ten|uno|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez)\\s+${word}\\b`, "i");
-    const match = text.match(regex);
-    if (match) return wordToNumber(match[1]);
-  }
-  return "";
-}
-
-function extractNumberBeforePhrase(text, phrases) {
-  for (const phrase of phrases) {
-    const regex = new RegExp(`(?:^|\\s)(\\d+|one|two|three|four|five|six|seven|eight|nine|ten|uno|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez)\\s+${phrase}\\b`, "i");
-    const match = text.match(regex);
-    if (match) return wordToNumber(match[1]);
-  }
-  return "";
-}
-
-function wordToNumber(value) {
-  const map = {
-    one: "1",
-    two: "2",
-    three: "3",
-    four: "4",
-    five: "5",
-    six: "6",
-    seven: "7",
-    eight: "8",
-    nine: "9",
-    ten: "10",
-    uno: "1",
-    dos: "2",
-    tres: "3",
-    cuatro: "4",
-    cinco: "5",
-    seis: "6",
-    siete: "7",
-    ocho: "8",
-    nueve: "9",
-    diez: "10",
-  };
-
-  return map[value.toLowerCase()] || value;
-}
-
-function normalizeNumber(value) {
-  return value.replace(/[^\d]/g, "");
 }
 
 function Grid({ children }) {
